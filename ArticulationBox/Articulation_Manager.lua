@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.0
+-- @version 1.0.1
 -- @author ArticulationBox
 -- @provides
 --   [main=main,midi_editor] .
@@ -14,7 +14,7 @@
 --   Personal banks are stored outside this package and are not distributed.
 -- @changelog
 --   Manual keyswitch notes coexist with automatic assignments.
---   Independently edited switches retain their manual pitch, timing and length.
+--   Later manual or automatic switches trim earlier switches on the same channel.
 -- Articulation Manager v5 UI (v4 MIDI format). One assignment per musical note; owned keyswitches.
 -- Built-in gfx/MIDI API and js_ReaScriptAPI for the embedded field.
 local R=reaper
@@ -602,11 +602,27 @@ local function plan(take,scene)
  end end
  local ordered={}
  for _,ev in pairs(events) do ordered[#ordered+1]=ev end
- -- Different keyswitch pitches on a channel must not remain held together.
+ -- Manual and automatic switches share one timeline per receiving channel.
+ -- A later note-on ends the earlier switch; never extend or delete a manual note.
  table.sort(ordered,function(a,b) if a.ch~=b.ch then return a.ch<b.ch end if a.s~=b.s then return a.s<b.s end return a.p<b.p end)
- for i=2,#ordered do
-  local prev,cur=ordered[i-1],ordered[i]
-  if prev.ch==cur.ch and prev.e>cur.s then prev.e=cur.s end
+ local timeline={}
+ for _,ev in ipairs(ordered) do timeline[#timeline+1]={s=ev.s,e=ev.e,ch=ev.ch,event=ev} end
+ for _,n in ipairs(scene.notes) do if n.keyswitchRow and not n.mute then
+  timeline[#timeline+1]={s=n.s,e=n.e,ch=n.ch,note=n}
+ end end
+ table.sort(timeline,function(a,b) if a.ch~=b.ch then return a.ch<b.ch end return a.s<b.s end)
+ scene.manualEnds={}
+ for i,entry in ipairs(timeline) do
+  local nextStart
+  for j=i+1,#timeline do
+   local later=timeline[j]
+   if later.ch~=entry.ch then break end
+   if later.s>entry.s then nextStart=later.s break end
+  end
+  if nextStart and entry.e>nextStart then
+   if entry.event then entry.event.e=nextStart
+   else scene.manualEnds[entry.note.idx]=nextStart end
+  end
  end
  for _,ev in ipairs(ordered) do
   for _,n in ipairs(occupancy[tostring(ev.ch)..':'..ev.p] or {}) do
@@ -763,6 +779,7 @@ end
 
 local editGeneration=0
 local movementSnapshot,musicalGeometry=nil,nil
+local switchesMatch
 local keyswitchGuard=nil
 local deletionSnapshot=nil
 local function rawKeyNotes(take)
@@ -841,6 +858,8 @@ local function watchKeyswitchRows()
   if not before or before.s~=n.s or before.e~=n.e or before.ch~=n.ch or before.p~=n.p or before.v~=n.v or before.mute~=n.mute then changed[id]=true end
  end
  if not next(changed) then return end
+ local planned,events=pcall(plan,take,current.scene)
+ if planned and switchesMatch and switchesMatch(current.scene,events) then return end
  for id,n in pairs(old) do
   local after=new[id]
   if not after or changed[id] then removed[id]=true end
@@ -933,6 +952,10 @@ local function execute(a,clear,sync,timing,removedKeys)
   shifted=shifted+result
  end
  local yes,events=pcall(plan,take,scene) if not yes then status=tostring(events) return false end
+ for _,n in ipairs(scene.notes) do
+  local ending=scene.manualEnds and scene.manualEnds[n.idx]
+  if ending then n.olds=n.olds or n.s n.olde=n.olde or n.e n.e=ending n.changed=true end
+ end
  local got,backup=R.MIDI_GetAllEvts(take,'') if not got then status='Could not back up MIDI.' return false end
  R.Undo_BeginBlock()
  local success,err=xpcall(function() write(take,scene,events) R.MIDI_Sort(take) verifyWrittenNotes(take,scene,events) end,debug.traceback)
@@ -1012,7 +1035,7 @@ musicalGeometry=function(scene)
  end end
  table.sort(values) return table.concat(values,'\n')
 end
-local function switchesMatch(scene,events)
+switchesMatch=function(scene,events)
  local actual,expected={},{}
  local function signature(n) return string.format('%.6f:%.6f:%d:%d:%d:%d',n.s,n.e,n.ch,n.p,n.v,n.mute and 1 or 0) end
  for _,n in ipairs(scene.notes) do if n.generated then actual[#actual+1]=signature(n) end end
@@ -1025,10 +1048,20 @@ local function watchMusicalEdits()
  local take=activeTake() if not take then movementSnapshot=nil return end
  local ok,scene=pcall(read,take) if not ok then return end
  local signature=musicalGeometry(scene)
+ local overlap=false local switches={}
+ for _,n in ipairs(scene.notes) do if (n.generated or n.keyswitchRow) and not n.mute then switches[#switches+1]=n end end
+ table.sort(switches,function(a,b) if a.ch~=b.ch then return a.ch<b.ch end return a.s<b.s end)
+ for i,n in ipairs(switches) do
+  for j=i+1,#switches do
+   local later=switches[j]
+   if later.ch~=n.ch then break end
+   if later.s>n.s then if n.e>later.s then overlap=true end break end
+  end
+ end
  local previous=movementSnapshot
- if needsDefaultAssignments(scene) or (previous and previous.take==take and previous.generation==editGeneration and previous.signature~=signature) then
+ if overlap or needsDefaultAssignments(scene) or (previous and previous.take==take and previous.generation==editGeneration and previous.signature~=signature) then
   local planned,events=pcall(plan,take,scene)
-  if (needsDefaultAssignments(scene) or not planned or not switchesMatch(scene,events)) and sync() then
+  if (needsDefaultAssignments(scene) or not planned or next(scene.manualEnds or {}) or not switchesMatch(scene,events)) and sync() then
    local reread,updated=pcall(read,take) if reread then signature=musicalGeometry(updated) end
   end
  end
