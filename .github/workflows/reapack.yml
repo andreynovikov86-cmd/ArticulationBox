@@ -1,0 +1,39 @@
+name: Build ReaPack index
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ArticulationBox/**'
+      - '.reapack-index.conf'
+      - '.github/workflows/reapack.yml'
+      - 'README.md'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: reapack-index
+  cancel-in-progress: false
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install official ReaPack indexer
+        run: gem install reapack-index --no-document
+      - name: Check packages and update index
+        run: |
+          reapack-index --check --strict
+          reapack-index --no-commit --scan
+      - name: Save generated index
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.xml
+          if git diff --cached --quiet -- index.xml; then exit 0; fi
+          git commit -m 'Update ReaPack index'
+          git push origin HEAD:main
