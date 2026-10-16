@@ -1,5 +1,7 @@
 # ArticulationBox
 
+By **Andrey Novikov**.
+
 **English** · [Русский](README_RU.md)
 
 User guide: [English](ArticulationBox/USER_GUIDE.md) · [Русский](ArticulationBox/USER_GUIDE_RU.md). Open **Help** in the full script menu for offline explanations.
@@ -43,3 +45,9 @@ When a later keyswitch starts on the same MIDI channel, the earlier keyswitch is
 To install updates, use **Extensions > ReaPack > Synchronize packages**.
 
 To publish a new release, change the package code, increase `@version` in `ArticulationBox/Articulation_Manager.lua`, update `@changelog`, and push to `main`. The workflow uses the [official ReaPack indexer](https://github.com/cfillion/reapack-index). Existing indexed versions are retained, and download links refer to fixed commits.
+
+## License
+
+ArticulationBox is licensed under the [MIT License](LICENSE.md), which permits use, modification and redistribution, including commercial use, with the required copyright and license notices.
+
+Adapted Gridbox code retains its original MIT copyright and license notice in [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt). Both notices are included in the ReaPack package.
