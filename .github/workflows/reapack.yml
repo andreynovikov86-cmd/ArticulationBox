@@ -23,6 +23,8 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - name: Install documentation converter
+        run: sudo apt-get update && sudo apt-get install -y pandoc
       - name: Install official ReaPack indexer
         run: gem install reapack-index --no-document
       - name: Check packages and update index
