@@ -15,6 +15,7 @@
 -- @changelog
 --   Manual keyswitch notes coexist with automatic assignments.
 --   Later manual or automatic switches trim earlier switches on the same channel.
+
 -- Articulation Manager v5 UI (v4 MIDI format). One assignment per musical note; owned keyswitches.
 -- Built-in gfx/MIDI API and js_ReaScriptAPI for the embedded field.
 local R=reaper
