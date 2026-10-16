@@ -1,6 +1,6 @@
 -- @description ArticulationBox
--- @version 1.0.2
--- @author ArticulationBox
+-- @version 1.0.3
+-- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
 --   [main=midi_editor] Articulation_Quick_Menu.lua
@@ -9,15 +9,18 @@
 --   [nomain] INSTALL_RU.txt
 --   [nomain] USER_GUIDE.md
 --   [nomain] USER_GUIDE_RU.md
+--   [nomain] LICENSE.md
 -- @about
 --   Compact articulation field for REAPER MIDI Editor.
 --   Requires js_ReaScriptAPI, installed separately through ReaPack.
 --   Supports per-track banks, keyswitches and MIDI channels.
 --   Personal banks are stored outside this package and are not distributed.
+--   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Add offline Help topics to the full menu.
---   Include detailed English and Russian user guides.
+--   Include the MIT license in the package and retain third-party notices.
 
+-- ArticulationBox by Andrey Novikov.
+-- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- Articulation Manager v5 UI (v4 MIDI format). One assignment per musical note; owned keyswitches.
 -- Built-in gfx/MIDI API and js_ReaScriptAPI for the embedded field.
 local R=reaper
