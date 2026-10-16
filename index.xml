@@ -43,6 +43,13 @@ Include detailed English and Russian user guides.]]></changelog>
 \u1056 ?\u1091 ?\u1089 ?\u1089 ?\u1082 ?\u1080 ?\u1081 ?
 }}}
 \par}
+{\pard \ql \f0 \sa180 \li0 \fi0 User guide: {\field{\*\fldinst{HYPERLINK "ArticulationBox/USER_GUIDE.md"}}{\fldrslt{\ul
+English
+}}}
+ \u183 ? {\field{\*\fldinst{HYPERLINK "ArticulationBox/USER_GUIDE_RU.md"}}{\fldrslt{\ul
+\u1056 ?\u1091 ?\u1089 ?\u1089 ?\u1082 ?\u1080 ?\u1081 ?
+}}}
+. Open {\b Help} in the full script menu for offline explanations.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 A compact articulation menu for the REAPER MIDI Editor.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 One ReaPack package includes the embedded articulation field, a quick menu at the mouse cursor, and a full settings menu. It supports manual and automatic keyswitches, MIDI channel switching, independent track banks, default articulations, keyswitches that follow musical notes, and keyswitch pitch protection during transposition. The script interface is in English.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Install with ReaPack\par}
