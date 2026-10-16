@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.1
+-- @version 1.0.2
 -- @author ArticulationBox
 -- @provides
 --   [main=main,midi_editor] .
@@ -7,14 +7,16 @@
 --   [main=midi_editor] Articulation_Menu_Popup.lua
 --   [nomain] THIRD_PARTY_NOTICES.txt
 --   [nomain] INSTALL_RU.txt
+--   [nomain] USER_GUIDE.md
+--   [nomain] USER_GUIDE_RU.md
 -- @about
 --   Compact articulation field for REAPER MIDI Editor.
 --   Requires js_ReaScriptAPI, installed separately through ReaPack.
 --   Supports per-track banks, keyswitches and MIDI channels.
 --   Personal banks are stored outside this package and are not distributed.
 -- @changelog
---   Manual keyswitch notes coexist with automatic assignments.
---   Later manual or automatic switches trim earlier switches on the same channel.
+--   Add offline Help topics to the full menu.
+--   Include detailed English and Russian user guides.
 
 -- Articulation Manager v5 UI (v4 MIDI format). One assignment per musical note; owned keyswitches.
 -- Built-in gfx/MIDI API and js_ReaScriptAPI for the embedded field.
@@ -1695,6 +1697,77 @@ local function articulationEntries(state)
  end
  return menu
 end
+-- Offline help is built in so manual installations keep working without guide files.
+local helpTopics={
+ {title="Quick start",text=[[1. Open a MIDI item and keep Articulation_Manager.lua running.
+2. Create a bank: Settings > Banks > New.
+3. Add articulation: choose the switching method and enter your instrument's mapping.
+4. Select musical notes, open the field menu and choose an articulation.
+5. Optional: Settings > Default articulation for notes without an override.
+6. Save the REAPER project.
+
+Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for an articulation-only menu at the mouse cursor.]]},
+ {title="Articulations and defaults",text=[[MIDI channel: routes musical notes to a channel.
+Keyswitch: sends a MIDI note that selects a sound in your instrument.
+Channel + keyswitch: combines both methods.
+
+Use the pitch, velocity and channels required by your instrument. KS channel 0 means the musical note's channel. New KS pitch uses the active piano-roll row.
+
+Select notes and choose a name to apply it. Clear articulation removes the explicit override; a configured default can apply again. Defaults require a keyswitch mapping.
+
+The field shows the selected articulation, Mixed for different assignments, or a dash if none is assigned. With no notes selected, it shows the default name, if configured.]]},
+ {title="Banks and saving",text=[[Banks selects the current track's bank. Settings > Banks creates, renames, removes, imports or exports banks. Export saves all banks of the current track.
+
+Track banks are independent. New tracks start with Empty bank; saved bank templates remain available. Bank and articulation edits are saved automatically. Save the project to retain track bank choices and note assignments.
+
+Appearance and common playback preferences persist between REAPER sessions. Timing changes also update the current bank's mappings.
+
+Removing a bank or mapping does not erase existing MIDI assignments. Use Clear articulation on notes when you want to remove their overrides.]]},
+ {title="Manual keyswitches",text=[[Draw or edit notes directly on mapped articulation rows. They are treated as manual switches and do not receive a default articulation. Their last switch remains active until another manual switch or an explicit automatic assignment on that MIDI channel.
+
+A later switch shortens the earlier keyswitch at its start. Different switches at exactly the same time on one channel remain ambiguous.
+
+Independently editing an automatic keyswitch's pitch, position, length or velocity makes it manual and removes its former automatic links. Musical notes are preserved. Move the musical note instead to keep an automatic link.]]},
+ {title="Playback and timing",text=[[Automatic keyswitches start before their musical notes and follow their length, ending sooner if another switch intervenes. Lead time controls the advance. Length and Overlap fields are retained for compatibility; they do not set the final duration in Follow musical note behavior.
+
+Keyswitch timing updates the current bank and its assignments in the active take; new articulations use the saved timing defaults.
+
+Chase MIDI note-ons enables REAPER's option to resend sustained notes when playback starts inside them. Test the result with your instrument.
+
+Auto-stagger conflicting notes delays conflicting musical starts slightly and shortens notes by the same amount, keeping their ends fixed. Spacing sets the delay in ms. It does not provide independent simultaneous articulations on one MIDI channel.]]},
+ {title="Editing and transposition",text=[[Keep the main script running while editing. Moving or resizing musical notes updates their linked automatic keyswitches. Returning notes to the same articulation can restore starts previously delayed by auto-stagger.
+
+At the item start, a musical note can move slightly later to leave room for its keyswitch; its end stays fixed.
+
+Broad selection/transposition protects keyswitch pitches while musical notes change pitch. With item/take pitch changes, the script writes the transpose into musical notes and resets the take pitch control, so the P+ value may disappear.
+
+Use REAPER Undo to reverse an edit. Protection and following require the running main script.]]},
+ {title="Tools and troubleshooting",text=[[Name keyswitch rows labels piano-roll rows from the bank.
+Refresh keyswitches rebuilds automatic switches in the active take from assignments.
+Clear missing keyswitch assignments removes stale links after switches were deleted; a default may then apply.
+Legacy keyswitches > Find for review selects possible older switches. Review the selection before Remove reviewed; manual switches can match too.
+Status shows the latest operation message.
+
+No sounds change: check the instrument mapping, MIDI channel and velocity. Empty menu: choose this track's bank and add mappings. An articulation-only menu has no settings: use the field or Articulation_Menu_Popup.lua for Help and Settings.]]},
+ {title="Field, actions and startup",text=[[Articulation_Manager.lua runs the embedded field and background updates.
+Articulation_Quick_Menu.lua opens only articulations at the mouse cursor.
+Articulation_Menu_Popup.lua opens the full menu.
+
+Lock position prevents moving/resizing the field. Turn it off to drag the field or its edges. Appearance and position also offers numeric position, size and font settings.
+Run script on startup starts the main script with REAPER. Close field stops it for this session; disable startup separately if needed.
+
+Detailed English and Russian guides are included as USER_GUIDE.md and USER_GUIDE_RU.md beside the scripts and linked from the GitHub README.]]},
+}
+local function helpMenu()
+ local entries={}
+ for _,topic in ipairs(helpTopics) do
+  local selected=topic
+  entries[#entries+1]={label=selected.title..'…',action=function() R.MB(selected.text,'ArticulationBox — '..selected.title,0) end}
+ end
+ entries[#entries+1]={separator=true}
+ entries[#entries+1]={label='Status…',action=function() R.MB(status,'ArticulationBox — Status',0) end}
+ return entries
+end
 local function buildMenu(state)
  local menu={}
  menu[#menu+1]={label=bank().name,disabled=true}
@@ -1726,11 +1799,12 @@ local function buildMenu(state)
   {label='Auto-stagger spacing…',action=staggerDelaySettings},
   {label='Clear missing keyswitch assignments',action=function() if not clearMissingAssignments() then R.MB(status,'Missing keyswitch assignments',0) end end},
   {label='Refresh keyswitches',action=function() if not sync() then R.MB(status,'Refresh keyswitches',0) end end},
-  {label='Status / help…',action=function() R.MB(status,'Articulation Manager',0) end},
+  {label='Status…',action=function() R.MB(status,'ArticulationBox — Status',0) end},
   {separator=true},
   {label='Run script on startup',checked=startupEnabled(),action=toggleStartup},
   {label='Close field',action=stop}
  }}
+ menu[#menu+1]={label='Help',children=helpMenu()}
  menu[#menu+1]={separator=true}
  menu[#menu+1]={label='Lock position',checked=positionLocked,action=togglePositionLock}
  return menu
