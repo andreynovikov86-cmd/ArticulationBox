@@ -50,6 +50,7 @@ Include detailed English and Russian user guides.]]></changelog>
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 ArticulationBox\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 By {\b Andrey Novikov}.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 {\b English} \u183 ? {\field{\*\fldinst{HYPERLINK "README_RU.md"}}{\fldrslt{\ul
 \u1056 ?\u1091 ?\u1089 ?\u1089 ?\u1082 ?\u1080 ?\u1081 ?
 }}}
@@ -92,6 +93,15 @@ THIRD_PARTY_NOTICES
 official ReaPack indexer
 }}}
 . Existing indexed versions are retained, and download links refer to fixed commits.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 License\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 ArticulationBox is licensed under the {\field{\*\fldinst{HYPERLINK "LICENSE.md"}}{\fldrslt{\ul
+MIT License
+}}}
+, which permits use, modification and redistribution, including commercial use, with the required copyright and license notices.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Adapted Gridbox code retains its original MIT copyright and license notice in {\field{\*\fldinst{HYPERLINK "ArticulationBox/THIRD_PARTY_NOTICES.txt"}}{\fldrslt{\ul
+THIRD_PARTY_NOTICES
+}}}
+. Both notices are included in the ReaPack package.\par}
 }
 ]]></description>
   </metadata>
