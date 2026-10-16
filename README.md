@@ -2,6 +2,8 @@
 
 **English** · [Русский](README_RU.md)
 
+User guide: [English](ArticulationBox/USER_GUIDE.md) · [Русский](ArticulationBox/USER_GUIDE_RU.md). Open **Help** in the full script menu for offline explanations.
+
 A compact articulation menu for the REAPER MIDI Editor.
 
 One ReaPack package includes the embedded articulation field, a quick menu at the mouse cursor, and a full settings menu. It supports manual and automatic keyswitches, MIDI channel switching, independent track banks, default articulations, keyswitches that follow musical notes, and keyswitch pitch protection during transposition. The script interface is in English.
