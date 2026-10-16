@@ -20,6 +20,17 @@ Later manual or automatic switches trim earlier switches on the same channel.]]>
         <source file="THIRD_PARTY_NOTICES.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0158f90aa52194a31fa0888da843b84adf56d251/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
         <source file="INSTALL_RU.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0158f90aa52194a31fa0888da843b84adf56d251/ArticulationBox/INSTALL_RU.txt</source>
       </version>
+      <version name="1.0.2" author="ArticulationBox" time="2026-10-16T16:42:37Z">
+        <changelog><![CDATA[Add offline Help topics to the full menu.
+Include detailed English and Russian user guides.]]></changelog>
+        <source main="main midi_editor">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/Articulation_Manager.lua</source>
+        <source main="midi_editor" file="Articulation_Quick_Menu.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/Articulation_Quick_Menu.lua</source>
+        <source main="midi_editor" file="Articulation_Menu_Popup.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/Articulation_Menu_Popup.lua</source>
+        <source file="THIRD_PARTY_NOTICES.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
+        <source file="INSTALL_RU.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/INSTALL_RU.txt</source>
+        <source file="USER_GUIDE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/USER_GUIDE.md</source>
+        <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/6ebd2b2e7356cf67e62c754eb58c77db4ffb7092/ArticulationBox/USER_GUIDE_RU.md</source>
+      </version>
     </reapack>
   </category>
   <metadata>
