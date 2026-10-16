@@ -1,5 +1,7 @@
 # ArticulationBox
 
+Автор: **Andrey Novikov**.
+
 [English](README.md) · **Русский**
 
 Руководство по функциям: [на русском](ArticulationBox/USER_GUIDE_RU.md) · [English](ArticulationBox/USER_GUIDE.md). Краткая справка без интернета доступна через **Help** в полном меню скрипта.
@@ -41,3 +43,9 @@ https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index
 ## Выпуск обновления
 
 Измените код пакета и увеличьте `@version` в `ArticulationBox/Articulation_Manager.lua`. Обновите `@changelog` и отправьте изменения в ветку `main`. Workflow использует [официальный индексатор ReaPack](https://github.com/cfillion/reapack-index); старые версии остаются в индексе, а ссылки указывают на зафиксированные коммиты.
+
+## Лицензия
+
+ArticulationBox распространяется по [лицензии MIT](LICENSE.md): разрешены использование, изменение и распространение, включая коммерческое, с сохранением предусмотренных лицензией уведомлений об авторстве и лицензии.
+
+Для использованного кода Gridbox сохранены исходные авторство и MIT-лицензия в [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt). Оба уведомления включены в пакет ReaPack.
