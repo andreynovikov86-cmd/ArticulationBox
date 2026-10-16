@@ -1,39 +1,43 @@
 # ArticulationBox
 
-Компактное меню артикуляций для MIDI-редактора REAPER. Интерфейс скрипта — на английском.
+**English** · [Русский](README_RU.md)
 
-Один пакет включает основное поле, короткое меню у курсора и полное меню настроек. Поддерживаются ручные и автоматические keyswitch, переключение MIDI-каналов, индивидуальные банки треков, дефолтные артикуляции, сопровождение нот и защита высот keyswitch при транспонировании.
+A compact articulation menu for the REAPER MIDI Editor.
 
-## Установка через ReaPack
+One ReaPack package includes the embedded articulation field, a quick menu at the mouse cursor, and a full settings menu. It supports manual and automatic keyswitches, MIDI channel switching, independent track banks, default articulations, keyswitches that follow musical notes, and keyswitch pitch protection during transposition. The script interface is in English.
 
-Адрес репозитория для импорта:
+## Install with ReaPack
+
+Import this repository URL:
 
 ```text
 https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index.xml
 ```
 
-В REAPER: **Extensions > ReaPack > Import repositories** → вставьте адрес → **Browse packages** → найдите **ArticulationBox** → **Install** → **Apply**.
+In REAPER, open **Extensions > ReaPack > Import repositories** and paste the URL. Then open **Browse packages**, find **ArticulationBox**, choose **Install**, and click **Apply**.
 
-Требуется расширение [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions). Установите его отдельно через ReaPack. После установки расширения перезапустите REAPER.
+The script requires [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions). Install it separately through ReaPack and restart REAPER after installing the extension.
 
-## Первый запуск
+## First run
 
-Откройте MIDI-айтем. В **Actions > MIDI Editor** запустите `Articulation_Manager.lua`. Клавишу быстрого выбора назначьте на `Articulation_Quick_Menu.lua` в том же разделе. Для сопровождения переключателей основной скрипт должен оставаться запущенным.
+Open a MIDI item. In **Actions > MIDI Editor**, run `Articulation_Manager.lua`. Assign a shortcut to `Articulation_Quick_Menu.lua` in the same action section for quick articulation selection. Keep the main script running so it can update linked keyswitches.
 
-Банки создаются через **Settings > Banks > New**, артикуляции — через **Add articulation**. Автозапуск: **Settings > Run script on startup**. Сохраняйте проект, чтобы восстановить выбранные банки треков и назначения нот.
+Create a bank through **Settings > Banks > New** and add entries through **Add articulation**. Enable **Settings > Run script on startup** for automatic startup. Save your project to restore track bank choices and note assignments.
 
-Личные банки, проекты и резервные копии пользователя в репозиторий не включены. При переходе с ручной установки на ReaPack перепривяжите горячие клавиши к экшнам новой установки.
+Personal banks, projects, and user backups are not included in this repository. When moving from a manual installation to ReaPack, reassign your shortcuts to the actions from the new installation.
 
-Подробности: [инструкция](ArticulationBox/INSTALL_RU.txt). Сведения о стороннем коде: [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt).
+For a full installation guide in Russian, see [INSTALL_RU](ArticulationBox/INSTALL_RU.txt). Third-party code acknowledgments are in [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt).
 
-## Ручные переключатели
+## Manual keyswitches
 
-На строках артикуляций можно рисовать и редактировать MIDI-ноты вручную. Такие ноты не получают дефолтную артикуляцию. Их последнее переключение действует до следующего явного автоматического назначения на том же MIDI-канале.
+You can draw and edit MIDI notes directly on articulation rows. These notes do not receive a default articulation. Their latest switch remains active until the next explicit automatic assignment on the same MIDI channel.
 
-Если отдельно изменить высоту, положение, длину или velocity автоматического keyswitch, он становится ручным. Его прежние автоматические привязки снимаются, а музыкальные ноты сохраняются. Перемещение музыкальных нот по-прежнему переносит их автоматические переключатели.
+If you independently change an automatic keyswitch's pitch, position, length, or velocity, it becomes manual. Its previous automatic assignments are removed while the musical notes are preserved. Moving musical notes still moves their linked automatic keyswitches.
 
-Разные переключатели на одном MIDI-канале не накладываются: более ранняя нота артикуляции автоматически сокращается до начала следующей. Музыкальные ноты сохраняют свою длину.
+When a later keyswitch starts on the same MIDI channel, the earlier keyswitch is shortened to end at that point. Musical note lengths are preserved.
 
-## Выпуск обновления
+## Updates
 
-Измените код пакета и увеличьте `@version` в `ArticulationBox/Articulation_Manager.lua`. Обновите `@changelog` и отправьте изменения в ветку `main`. Workflow использует [официальный индексатор ReaPack](https://github.com/cfillion/reapack-index); старые версии остаются в индексе, а ссылки указывают на зафиксированные коммиты.
+To install updates, use **Extensions > ReaPack > Synchronize packages**.
+
+To publish a new release, change the package code, increase `@version` in `ArticulationBox/Articulation_Manager.lua`, update `@changelog`, and push to `main`. The workflow uses the [official ReaPack indexer](https://github.com/cfillion/reapack-index). Existing indexed versions are retained, and download links refer to fixed commits.
