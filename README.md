@@ -20,17 +20,23 @@ https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index
 
 In REAPER, open **Extensions > ReaPack > Import repositories** and paste the URL. Then open **Browse packages**, find **ArticulationBox**, choose **Install**, and click **Apply**.
 
-The script requires [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions). Install it separately through ReaPack and restart REAPER after installing the extension.
+The script requires [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions) and [ReaImGui](https://github.com/cfillion/reaimgui) for the parameter editor. Install both separately through ReaPack and restart REAPER after installing the extensions.
 
 ## First run
 
 Open a MIDI item. In **Actions > MIDI Editor**, run `Articulation_Manager.lua`. Assign a shortcut to `Articulation_Quick_Menu.lua` in the same action section for quick articulation selection. Keep the main script running so it can update linked keyswitches.
 
-Create a bank through **Settings > Banks > New** and add entries through **Add articulation**. Enable **Settings > Run script on startup** for automatic startup. Save your project to restore track bank choices and note assignments.
+Create a bank through **Settings > Banks > New** and add entries through **Add / Edit articulation**. Enable **Settings > Run script on startup** for automatic startup. Save your project to restore track bank choices and note assignments.
 
 Personal banks, projects, and user backups are not included in this repository. When moving from a manual installation to ReaPack, reassign your shortcuts to the actions from the new installation.
 
 For a full installation guide in Russian, see [INSTALL_RU](ArticulationBox/INSTALL_RU.txt). Third-party code acknowledgments are in [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt).
+
+## Articulation editor
+
+Add / Edit articulation uses one compact, resizable window with **Keyswitch**, **Channel**, and **KS + Channel** choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. **Save & Next** builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.
+
+Choose **Before note start** or **After note start** and set Delay in milliseconds. A delayed keyswitch can trigger a loop ending after a chord starts, with independent keyswitch velocity. Automatic keyswitches still follow the musical note’s end.
 
 ## Manual keyswitches
 
