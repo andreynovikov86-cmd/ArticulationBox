@@ -2,13 +2,13 @@
 
 **English** · [Русский](USER_GUIDE_RU.md) · [Repository](https://github.com/andreynovikov86-cmd/ArticulationBox)
 
-Open **Help** in the field's full menu for short explanations without an internet connection. The quick articulation menu intentionally contains only articulation choices.
+Open **Help** in the field's full menu for short explanations without an internet connection. The quick articulation menu intentionally contains only articulation choices. The full menu keeps these choices under Articulations to remain short with large banks.
 
 ## 1. Quick start
 
 1. Open a MIDI item and keep Articulation_Manager.lua running.
 2. Create a bank: Settings > Banks > New.
-3. Add articulation: choose the switching method and enter your instrument's mapping.
+3. Add / Edit articulation: configure mappings in one window. Use Save & Next to build a bank quickly.
 4. Select musical notes, open the field menu and choose an articulation.
 5. Optional: Settings > Default articulation for notes without an override.
 6. Save the REAPER project.
@@ -17,11 +17,15 @@ Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for an articulation
 
 ## 2. Articulations and defaults
 
-MIDI channel: routes musical notes to a channel.
+Channel: routes musical notes to a channel.
 Keyswitch: sends a MIDI note that selects a sound in your instrument.
-Channel + keyswitch: combines both methods.
+KS + Channel: combines both methods.
 
-Use the pitch, velocity and channels required by your instrument. KS channel 0 means the musical note's channel. New KS pitch uses the active piano-roll row.
+Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show the relevant parameters. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
+
+Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. Both values remain editable. Save stores changes without closing the window. Save & Next immediately stores a new mapping and prepares another; when editing, it advances to the next saved mapping. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
+
+Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; the highest-velocity name labels the group. Each variant keeps its own name and velocity.
 
 Select notes and choose a name to apply it. Clear articulation removes the explicit override; a configured default can apply again. Defaults require a keyswitch mapping.
 
@@ -47,9 +51,11 @@ Independently editing an automatic keyswitch's pitch, position, length or veloci
 
 ## 5. Playback and timing
 
-Automatic keyswitches start before their musical notes and follow their length, ending sooner if another switch intervenes. Lead time controls the advance. Length and Overlap fields are retained for compatibility; they do not set the final duration in Follow musical note behavior.
+Trigger chooses Before note start or After note start. Delay (ms) sets the distance in milliseconds; Trigger chooses which side of the note start it applies to. Automatic keyswitches end with their musical notes, or sooner if another switch intervenes. Length/Overlap are legacy compatibility values.
 
-Keyswitch timing updates the current bank and its assignments in the active take; new articulations use the saved timing defaults.
+For a loop ending, use After note start and a suitable Delay. KS velocity is independent of musical velocity: a chord with velocity 1 can trigger a keyswitch with velocity 100. The script preserves the chord velocity. MIDI tick resolution can impose a minimum delay.
+
+Keyswitch timing updates the current bank and its assignments in the active take, preserving each mapping's Before/After direction; new articulations use the saved timing defaults.
 
 Chase MIDI note-ons enables REAPER's option to resend sustained notes when playback starts inside them. Test the result with your instrument.
 
@@ -59,7 +65,7 @@ Auto-stagger conflicting notes delays conflicting musical starts slightly and sh
 
 Keep the main script running while editing. Moving or resizing musical notes updates their linked automatic keyswitches. Returning notes to the same articulation can restore starts previously delayed by auto-stagger.
 
-At the item start, a musical note can move slightly later to leave room for its keyswitch; its end stays fixed.
+At the item start, or with auto-stagger enabled when neighboring starts leave no MIDI tick for a switch, a musical note can move slightly later to leave room for a Before keyswitch; its end stays fixed. After keyswitches do not require this advance space.
 
 Broad selection/transposition protects keyswitch pitches while musical notes change pitch. With item/take pitch changes, the script writes the transpose into musical notes and resets the take pitch control, so the P+ value may disappear.
 
@@ -72,6 +78,8 @@ Refresh keyswitches rebuilds automatic switches in the active take from assignme
 Clear missing keyswitch assignments removes stale links after switches were deleted; a default may then apply.
 Legacy keyswitches > Find for review selects possible older switches. Review the selection before Remove reviewed; manual switches can match too.
 Status shows the latest operation message.
+
+The parameter editor requires ReaImGui, installed through ReaPack. Restart REAPER after installing the extension.
 
 No sounds change: check the instrument mapping, MIDI channel and velocity. Empty menu: choose this track's bank and add mappings. An articulation-only menu has no settings: use the field or Articulation_Menu_Popup.lua for Help and Settings.
 
@@ -91,11 +99,11 @@ Detailed English and Russian guides are included as USER_GUIDE.md and USER_GUIDE
 | Field | Meaning |
 | --- | --- |
 | Name | The label shown in the articulation menu and on keyswitch rows. |
-| MIDI channel / Note channel | Destination channel for musical notes (1–16), used by channel-based mappings. |
-| KS pitch | MIDI note number (0–127) required by the instrument. New mappings use the active piano-roll row; the number avoids octave-label differences between instruments. |
-| Velocity | Keyswitch velocity (1–127). Some libraries use velocity to select a variant. |
-| Lead time | How many milliseconds before the musical note the keyswitch should start. Available item space and neighboring notes can limit this. |
-| Length | Retained for compatibility. Automatic switches currently always follow musical notes. |
+| Channel | Destination channel for musical notes (1–16), used by channel-based mappings. |
+| KS note | MIDI note number (0–127) required by the instrument. New mappings use the active piano-roll row; the open editor also learns new MIDI note-ons or piano-roll key clicks; the number avoids octave-label differences between instruments. |
+| KS velocity | Keyswitch velocity (1–127). Some libraries use velocity to select a variant. |
+| Trigger | Before note start or After note start. |
+| Delay (ms) | Timing distance from the musical-note start. MIDI tick resolution, available item space and neighboring switches can limit this. |
 | KS channel | Channel used for the keyswitch. 0 follows the musical note's channel; 1–16 chooses an explicit channel. |
 
 Mappings are listed by descending KS pitch: higher pitches appear first. A checkmark identifies an articulation used by selected notes; when a selection is mixed, note counts indicate how many notes use each entry. Changing a bank mapping does not rewrite every old assignment in every item: existing assignments keep their saved mapping. Reapply the articulation to selected notes to use a revised pitch/channel mapping. The timing tool can refresh current-bank timings in the active take.
@@ -105,10 +113,8 @@ Mappings are listed by descending KS pitch: higher pitches appear first. A check
 | Menu item | What it does |
 | --- | --- |
 | Clear articulation | Removes the explicit assignment from selected musical notes. A configured default can apply again. |
-| Add articulation | Creates a mapping in the current bank. Adding to Empty bank creates a saved New bank. |
-| Edit articulation | Lets you choose and edit a mapping in the current bank. |
-| Remove articulation | Removes a mapping from the current bank, preserving existing MIDI assignments. |
-| Articulation names | Apply the chosen mapping to selected musical notes. |
+| Add / Edit articulation | Opens the bank’s parameter window. Select Add New to add, or select a saved entry to edit. Remove articulation inside the window deletes the selected mapping while preserving existing MIDI assignments. |
+| Articulations | Opens the bank’s articulation choices. Velocity variants on the same KS pitch and routing are grouped in submenus. The shortcut quick menu opens choices directly. |
 | Banks | Selects the active bank for this track. |
 | Settings > Banks > New / Rename / Remove | Manages bank mappings. Other tracks retain independent copies. |
 | Settings > Banks > Import / Export | Imports a bank file or exports all banks of the current track. Keep exported files as backups. |
@@ -118,7 +124,7 @@ Mappings are listed by descending KS pitch: higher pitches appear first. A check
 | Settings > Legacy keyswitches > Remove reviewed | Deletes the reviewed selection only after the script's safety checks. |
 | Settings > Name keyswitch rows | Adds articulation names to mapped piano-roll rows. |
 | Settings > Default articulation | Selects the fallback keyswitch articulation or disables it with None. Channel-only mappings cannot be defaults. |
-| Settings > Keyswitch timing | Sets lead/compatibility length for current-bank mappings, refreshes their assignments in the active take, and saves defaults for new mappings. Overlap is retained for compatibility with older timing behavior. |
+| Settings > Keyswitch timing | Sets timing distance/compatibility length for current-bank mappings, keeping each mapping’s Before/After direction, refreshes their assignments in the active take, and saves defaults for new mappings. Overlap is retained for compatibility with older timing behavior. |
 | Settings > Chase MIDI note-ons | Toggles REAPER's note-chase option for starting playback inside sustained MIDI notes. |
 | Settings > Auto-stagger conflicting notes | Enables small start delays to resolve different automatic articulations at one onset/channel. Ends stay fixed. |
 | Settings > Auto-stagger spacing | Sets the delay between conflicting starts (0.1–50 ms). MIDI tick resolution can impose a larger minimum. |
@@ -129,6 +135,14 @@ Mappings are listed by descending KS pitch: higher pitches appear first. A check
 | Settings > Close field | Stops the main script for this session. |
 | Help | Opens the built-in help topics and current status. |
 | Lock position | Prevents dragging or resizing the embedded field. |
+
+## Example: a delayed ending
+
+Choose **Keyswitch**, set **Trigger > After note start**, then enter **Delay (ms)** and the instrument’s required KS note and velocity. For example, a chord at velocity 1 can send an ending keyswitch at velocity 100, 1 ms after the chord starts. The chord velocity is preserved. Automatic keyswitches follow the musical note’s end; a later switch can shorten them. If the delay exceeds the note duration, the switch uses the minimum one-tick length inside the item.
+
+For MIDI input, the editor reads incoming note-on pitch and velocity. Piano-roll key clicks use the active row and REAPER’s default note velocity. Captured values remain editable until another key is played. Learning does not insert or record notes.
+
+**Save** keeps the window open. **Save & Next** stores a new mapping and clears its name for another; while editing, it selects the next saved mapping. The saved name remains visible. **Add variant** starts a new mapping with copied parameters and an empty name. Piano-roll names refresh immediately after each save. Closing the editor discards only the current unsaved entry; earlier entries stay saved.
 
 ## Example: a default and an exception
 
