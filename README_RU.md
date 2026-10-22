@@ -20,17 +20,23 @@ https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index
 
 В REAPER: **Extensions > ReaPack > Import repositories** → вставьте адрес → **Browse packages** → найдите **ArticulationBox** → **Install** → **Apply**.
 
-Требуется расширение [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions). Установите его отдельно через ReaPack. После установки расширения перезапустите REAPER.
+Требуются [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensions) и [ReaImGui](https://github.com/cfillion/reaimgui) для окна параметров. Установите оба расширения отдельно через ReaPack и перезапустите REAPER.
 
 ## Первый запуск
 
 Откройте MIDI-айтем. В **Actions > MIDI Editor** запустите `Articulation_Manager.lua`. Клавишу быстрого выбора назначьте на `Articulation_Quick_Menu.lua` в том же разделе. Для сопровождения переключателей основной скрипт должен оставаться запущенным.
 
-Банки создаются через **Settings > Banks > New**, артикуляции — через **Add articulation**. Автозапуск: **Settings > Run script on startup**. Сохраняйте проект, чтобы восстановить выбранные банки треков и назначения нот.
+Банки создаются через **Settings > Banks > New**, артикуляции — через **Add / Edit articulation**. Автозапуск: **Settings > Run script on startup**. Сохраняйте проект, чтобы восстановить выбранные банки треков и назначения нот.
 
 Личные банки, проекты и резервные копии пользователя в репозиторий не включены. При переходе с ручной установки на ReaPack перепривяжите горячие клавиши к экшнам новой установки.
 
 Подробности: [инструкция](ArticulationBox/INSTALL_RU.txt). Сведения о стороннем коде: [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt).
+
+## Окно артикуляции
+
+Добавление и редактирование объединены в одно компактное окно с вариантами **Keyswitch**, **Channel**, **KS + Channel**. Нажатие клавиши MIDI-контроллера или клавиши пианоролла подставляет ноту и velocity keyswitch; значения можно поправить вручную. **Save & Next** позволяет создать несколько записей подряд. Размер окна меняется за края и запоминается. Строка Bank показывает банк назначения, список Articulation позволяет добавлять и редактировать записи, а Remove articulation удаляет запись. Список основного меню находится в Articulations; варианты одной KS note с разной velocity объединяются в подменю. Горячая клавиша открывает выбор напрямую.
+
+**Before note start** и **After note start** задают срабатывание до начала музыкальной ноты или после него. Настройте Delay в миллисекундах и независимую KS velocity, например для окончания лупа после взятия аккорда. Длина keyswitch по-прежнему следует концу музыкальной ноты.
 
 ## Ручные переключатели
 
