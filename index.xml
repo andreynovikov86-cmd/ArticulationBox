@@ -71,10 +71,13 @@ English
 {\pard \ql \f0 \sa180 \li0 \fi0 The script requires {\field{\*\fldinst{HYPERLINK "https://github.com/juliansader/ReaExtensions"}}{\fldrslt{\ul
 js_ReaScriptAPI
 }}}
-. Install it separately through ReaPack and restart REAPER after installing the extension.\par}
+ and {\field{\*\fldinst{HYPERLINK "https://github.com/cfillion/reaimgui"}}{\fldrslt{\ul
+ReaImGui
+}}}
+ for the parameter editor. Install both separately through ReaPack and restart REAPER after installing the extensions.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 First run\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Open a MIDI item. In {\b Actions > MIDI Editor}, run {\f1 Articulation_Manager.lua}. Assign a shortcut to {\f1 Articulation_Quick_Menu.lua} in the same action section for quick articulation selection. Keep the main script running so it can update linked keyswitches.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Create a bank through {\b Settings > Banks > New} and add entries through {\b Add articulation}. Enable {\b Settings > Run script on startup} for automatic startup. Save your project to restore track bank choices and note assignments.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Create a bank through {\b Settings > Banks > New} and add entries through {\b Add / Edit articulation}. Enable {\b Settings > Run script on startup} for automatic startup. Save your project to restore track bank choices and note assignments.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Personal banks, projects, and user backups are not included in this repository. When moving from a manual installation to ReaPack, reassign your shortcuts to the actions from the new installation.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 For a full installation guide in Russian, see {\field{\*\fldinst{HYPERLINK "ArticulationBox/INSTALL_RU.txt"}}{\fldrslt{\ul
 INSTALL_RU
@@ -83,6 +86,9 @@ INSTALL_RU
 THIRD_PARTY_NOTICES
 }}}
 .\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Articulation editor\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Add / Edit articulation uses one compact, resizable window with {\b Keyswitch}, {\b Channel}, and {\b KS + Channel} choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. {\b Save & Next} builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Choose {\b Before note start} or {\b After note start} and set Delay in milliseconds. A delayed keyswitch can trigger a loop ending after a chord starts, with independent keyswitch velocity. Automatic keyswitches still follow the musical note\u8217's end.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Manual keyswitches\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 You can draw and edit MIDI notes directly on articulation rows. These notes do not receive a default articulation. Their latest switch remains active until the next explicit automatic assignment on the same MIDI channel.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 If you independently change an automatic keyswitch's pitch, position, length, or velocity, it becomes manual. Its previous automatic assignments are removed while the musical notes are preserved. Moving musical notes still moves their linked automatic keyswitches.\par}
