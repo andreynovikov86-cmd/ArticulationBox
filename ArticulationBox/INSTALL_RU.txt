@@ -5,7 +5,8 @@ ARTICULATIONBOX — УСТАНОВКА ЧЕРЕЗ REAPACK
    https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index.xml
 3. Откройте Extensions > ReaPack > Browse packages.
 4. Найдите ArticulationBox, выберите Install и нажмите Apply.
-5. Отдельно установите js_ReaScriptAPI через Browse packages, если его ещё нет.
+5. Отдельно установите js_ReaScriptAPI и ReaImGui через Browse packages,
+   если их ещё нет. ReaImGui нужен для окна параметров артикуляции.
    После установки расширения перезапустите REAPER.
 6. Откройте MIDI-айтем. В Actions > MIDI Editor запустите Articulation_Manager.lua.
 
@@ -14,7 +15,7 @@ MIDI Editor. Основной скрипт оставляйте работающ
 Автозапуск: Settings > Run script on startup.
 
 Банки настраиваются для каждого трека отдельно. Создать банк:
-Settings > Banks > New. Создать артикуляцию: Add articulation.
+Settings > Banks > New. Добавить или изменить артикуляцию: Add / Edit articulation.
 Импорт или экспорт своих банков: Settings > Banks > Import / Export.
 Личные банки и проекты в этот публичный пакет не включены.
 Сохраняйте проект, чтобы выбранный банк и назначения нот восстановились.
