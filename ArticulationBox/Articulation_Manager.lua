@@ -1,10 +1,11 @@
 -- @description ArticulationBox
--- @version 1.0.3
+-- @version 1.0.6
 -- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
 --   [main=midi_editor] Articulation_Quick_Menu.lua
 --   [main=midi_editor] Articulation_Menu_Popup.lua
+--   [nomain] Articulation_Editor.lua
 --   [nomain] THIRD_PARTY_NOTICES.txt
 --   [nomain] INSTALL_RU.txt
 --   [nomain] USER_GUIDE.md
@@ -12,12 +13,15 @@
 --   [nomain] LICENSE.md
 -- @about
 --   Compact articulation field for REAPER MIDI Editor.
---   Requires js_ReaScriptAPI, installed separately through ReaPack.
+--   Requires js_ReaScriptAPI and ReaImGui, installed separately through ReaPack.
 --   Supports per-track banks, keyswitches and MIDI channels.
 --   Personal banks are stored outside this package and are not distributed.
 --   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Include the MIT license in the package and retain third-party notices.
+--   Keep Save open; support Add New, Add variant and next-entry editing.
+--   Learn existing mapping names/settings and refresh row names on every save.
+--   Stabilize custom window dragging and use one Delay timing label.
+--   Preserve overrides while adding chord notes and repair close switch timing.
 
 -- ArticulationBox by Andrey Novikov.
 -- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
@@ -56,7 +60,7 @@ end
 local function valid(a)
  return a.name and a.name~='' and (a.mode=='ch' or a.mode=='ks' or a.mode=='both')
   and number(a.channel,1,16,true) and number(a.pitch,0,127,true)
-  and number(a.velocity,1,127,true) and number(a.lead,0.01,10000,false)
+  and number(a.velocity,1,127,true) and number(a.lead,-10000,10000,false) and math.abs(a.lead)>=0.01
   and number(a.length,0.01,10000,false) and number(a.kschannel,0,16,true)
 end
 local function defaults(name,mode,ch)
@@ -227,6 +231,18 @@ local function appendMarker(tail,data)
 end
 local function key(s,ch,p) return string.format('%.6f:%d:%d',s,ch,p) end
 local function round(v) return math.floor(v+0.5) end
+-- Existing positive lead values mean Before; negative values encode After.
+-- Keep the bank/notation format compatible with all existing positive timings.
+local function afterSwitchStart(take,start,lead)
+ local time=R.MIDI_GetProjTimeFromPPQPos(take,start)
+ return math.max(math.floor(start)+1,round(R.MIDI_GetPPQPosFromProjTime(take,time-lead/1000)))
+end
+local function switchFits(take,a,start,switchStart)
+ if a.lead<0 then return math.abs(switchStart-afterSwitchStart(take,start,a.lead))<0.5 end
+ local time=R.MIDI_GetProjTimeFromPPQPos(take,start)
+ local earliest=math.floor(R.MIDI_GetPPQPosFromProjTime(take,time-a.lead/1000))-1
+ return switchStart>=earliest and switchStart<start
+end
 local function activeTake()
  local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
  if not take or not isMidiTake(take) then status='Open the MIDI editor.' return end
@@ -244,7 +260,7 @@ local function keyswitchRows()
 end
 local function read(take)
  local ok,count,_,textCount=R.MIDI_CountEvts(take) if not ok then error('Could not read MIDI.') end
- local scene={notes={},texts={},bykey={},groups={},generated={}}
+ local scene={take=take,notes={},texts={},bykey={},groups={},generated={}}
  for i=0,count-1 do
   local yes,sel,mute,s,e,ch,p,v=R.MIDI_GetNote(take,i)
   if yes then
@@ -288,18 +304,24 @@ local function read(take)
  local controls,explicit={},{}
  for _,n in ipairs(scene.notes) do
   if n.keyswitchRow and not n.mute then
-   local a
+   local a,fallback,velocities=nil,nil,{}
    for _,mapped in ipairs(bank().arts) do
     local ch=mapped.kschannel==0 and (mapped.mode=='both' and mapped.channel-1 or n.ch) or mapped.kschannel-1
     if mapped.mode~='ch' and mapped.pitch==n.p and ch==n.ch then
-     a={bank=bank().name} for k,v in pairs(mapped) do a[k]=v end break
+     fallback=fallback or mapped velocities[mapped.velocity]=true
+     if mapped.velocity==n.v then a={bank=bank().name} for k,v in pairs(mapped) do a[k]=v end break end
     end
    end
+   if not a and fallback then
+    local variants=0 for _ in pairs(velocities) do variants=variants+1 end
+    if variants==1 then a={bank=bank().name} for k,v in pairs(fallback) do a[k]=v end end
+   end
+   if a then a.velocity=n.v end
    a=a or {bank=bank().name,name='KS '..n.p,mode='ks',channel=n.ch+1,pitch=n.p,velocity=n.v,lead=1,length=1,kschannel=n.ch+1}
    controls[n.ch]=controls[n.ch] or {} controls[n.ch][#controls[n.ch]+1]={s=n.s,a=a}
   elseif not n.generated and n.a and not n.a.implicit and n.a.mode~='ch' and not n.mute then
    local ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1
-   explicit[ch]=explicit[ch] or {} explicit[ch][#explicit[ch]+1]=n.s
+   explicit[ch]=explicit[ch] or {} explicit[ch][#explicit[ch]+1]=n.a.lead<0 and afterSwitchStart(take,n.s,n.a.lead) or n.s
   end
  end
  for _,n in ipairs(scene.notes) do if not n.generated and not n.keyswitchRow then
@@ -320,14 +342,18 @@ end
 -- Per-track ownership preserves prior names independently for every channel.
 local rowNameTrack,rowNameSignature=nil,nil
 local rowNameKey='P_EXT:ABART_ROW_NAMES'
-local function rowNamesUpdate()
+local function rowNamesUpdate(destinationTrack,destinationBank)
  if not R.GetMediaItem_Track or not R.SetTrackMIDINoteNameEx or not R.GetTrackMIDINoteNameEx or not R.GetSetMediaTrackInfo_String then return end
- local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
- if not take or not isMidiTake(take) then return end
- local track=R.GetMediaItem_Track(R.GetMediaItemTake_Item(take))
- loadTrackBanks()
+ local track=destinationTrack
+ if not track then
+  local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
+  if not take or not isMidiTake(take) then return end
+  track=R.GetMediaItem_Track(R.GetMediaItemTake_Item(take))
+  loadTrackBanks()
+ end
+ local current=destinationBank or bank()
  local enabled=R.GetExtState(SECTION,'nameKeyswitchRows')~='0'
- local signature=tostring(enabled)..':'..bankIndex..':'..serialize()
+ local signature=tostring(enabled)..':'..serialize({current})
  if track==rowNameTrack and signature==rowNameSignature then return end
  local _,stored=R.GetSetMediaTrackInfo_String(track,rowNameKey,'',false)
  local owned={}
@@ -336,7 +362,7 @@ local function rowNamesUpdate()
   if pitch and channel and f[3] and f[4] then owned[pitch..':'..channel]={pitch=pitch,channel=channel,previous=dec(f[3]),applied=dec(f[4])} end
  end
  local wanted={}
- if enabled then for _,a in ipairs(bank().arts) do if a.mode~='ch' then
+ if enabled then for _,a in ipairs(current.arts) do if a.mode~='ch' then
   local first,last=0,15
   if a.kschannel~=0 then first=a.kschannel-1 last=first
   elseif a.mode=='both' then first=a.channel-1 last=first end
@@ -430,7 +456,7 @@ local function staggerConflicts(take,scene,includeExisting)
  local delay=number(R.GetExtState(SECTION,'staggerMs'),0.1,50,false) or 2
  local groups,order={},{}
  for _,n in ipairs(scene.notes) do
-  if not n.generated and not n.mute and ((n.sel and n.changed) or includeExisting) and n.a and n.a.mode~='ch' then
+  if not n.generated and not n.mute and ((n.sel and n.changed) or includeExisting) and n.a and n.a.mode~='ch' and n.a.lead>=0 then
    local id=key(n.s,n.ch,0)..':'..config(n.a)
    if not groups[id] then groups[id]={s=n.s,ch=n.ch,choice=config(n.a),notes={},members={}} order[#order+1]=groups[id] end
    local g=groups[id] g.notes[#g.notes+1]=n g.members[n]=true
@@ -447,7 +473,7 @@ local function staggerConflicts(take,scene,includeExisting)
  for _,g in ipairs(order) do
   local conflict=false
   for _,n in ipairs(scene.notes) do
-   if not g.members[n] and not n.generated and not n.mute and n.effective and n.ch==g.ch and key(n.s,n.ch,0)==key(g.s,g.ch,0) and config(n.effective)~=g.choice then conflict=true break end
+   if not g.members[n] and not n.generated and not n.mute and n.effective and n.effective.lead>=0 and n.ch==g.ch and key(n.s,n.ch,0)==key(g.s,g.ch,0) and config(n.effective)~=g.choice then conflict=true break end
   end
   if conflict then
    local time=R.MIDI_GetProjTimeFromPPQPos(take,g.s)
@@ -495,10 +521,17 @@ local function ensureBoundaryRoom(take,scene)
     if other~=n and not other.generated and not other.mute and not other.a and other.ch==ch and other.s<n.s and math.floor(other.s)==left then needsRoom=true break end
    end
   end
-  if not n.generated and not n.mute and n.a and n.a.mode~='ch' and needsRoom then
+  local closeStart=false
+  if R.GetExtState(SECTION,'autoStagger')=='1' and n.a and n.a.mode~='ch' and n.a.lead>=0 then
+   local ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1
+   for _,other in ipairs(scene.notes) do
+    if other~=n and not other.generated and not other.keyswitchRow and not other.mute and other.ch==ch and other.s<n.s and math.floor(n.s)-math.floor(other.s)<2 then closeStart=true break end
+   end
+  end
+  if not n.generated and not n.keyswitchRow and not n.mute and n.a and n.a.mode~='ch' and n.a.lead>=0 and (needsRoom or closeStart) then
    local id=key(n.s,n.ch,0)..':'..config(n.a)
    if not groups[id] then
-    groups[id]={notes={},members={},choice=config(n.a),ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1}
+    groups[id]={s=n.s,close=closeStart,notes={},members={},choice=config(n.a),ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1}
     order[#order+1]=groups[id]
    end
    local g=groups[id] g.notes[#g.notes+1]=n g.members[n]=true
@@ -511,7 +544,12 @@ local function ensureBoundaryRoom(take,scene)
   return a.notes[1].idx<b.notes[1].idx
  end)
  for _,g in ipairs(order) do
-  local candidate=left+1
+  local candidate=math.max(left+1,math.ceil(g.s))
+  if g.close then
+   local time=R.MIDI_GetProjTimeFromPPQPos(take,g.s)
+   local delay=number(R.GetExtState(SECTION,'staggerMs'),0.1,50,false) or 2
+   candidate=math.max(candidate,round(R.MIDI_GetPPQPosFromProjTime(take,time+delay/1000)))
+  end
   for attempt=1,#scene.notes+1 do
    local nextCandidate=candidate
    for _,other in ipairs(scene.notes) do
@@ -527,6 +565,7 @@ local function ensureBoundaryRoom(take,scene)
    end
    if nextCandidate==candidate then break end candidate=nextCandidate
   end
+  if g.close and R.MIDI_GetProjTimeFromPPQPos(take,candidate)-R.MIDI_GetProjTimeFromPPQPos(take,g.s)>0.050001 then error('Auto-stagger would exceed 50 ms. No notes were changed.') end
   for _,n in ipairs(g.notes) do
    if n.e-candidate<1 then error('This note is too short to leave room for a keyswitch at the item start. No notes were changed.') end
   end
@@ -572,21 +611,27 @@ local function plan(take,scene)
    -- Reject different managed articulations at the same onset on one instrument.
    local conflict=key(n.s,n.ch,0)
    local choice=config(a)
-   if seen[conflict] and seen[conflict]~=choice then error('Different articulations start together on one channel. Use separate channels.') end
-   seen[conflict]=choice
-   if a.mode~='ch' and not n.skipDefaultSwitch and not n.manualArt and not (n.manualSignal and n.manualSignal.pitch==a.pitch and (a.kschannel==0 or a.kschannel==n.manualSignal.kschannel)) then
+   if a.mode=='ch' or a.lead>=0 then
+    if seen[conflict] and seen[conflict]~=choice then error('Different articulations start together on one channel. Use separate channels.') end
+    seen[conflict]=choice
+   end
+   if a.mode~='ch' and not n.skipDefaultSwitch and not n.manualArt and not (a.lead>=0 and n.manualSignal and n.manualSignal.pitch==a.pitch and n.manualSignal.velocity==a.velocity and (a.kschannel==0 or a.kschannel==n.manualSignal.kschannel)) then
     local time=R.MIDI_GetProjTimeFromPPQPos(take,n.s)
     local ch=a.kschannel==0 and n.ch or a.kschannel-1
     local onset=math.floor(n.s)
     local previous=precedingStart(ch,n.s)
     local earliest=math.max(math.ceil(left),previous and (math.floor(previous)+1) or math.ceil(left))
     local desired=round(R.MIDI_GetPPQPosFromProjTime(take,time-a.lead/1000))
-    local s=math.max(earliest,math.min(onset-1,desired))
-    if s>=onset then error('No MIDI tick available before this note for a keyswitch. Move the note slightly later or use separate channels.') end
+    local s
+    if a.lead<0 then s=afterSwitchStart(take,n.s,a.lead)
+    else
+     s=math.max(earliest,math.min(onset-1,desired))
+     if s>=onset then error('Not enough space for a keyswitch before this note. Enable Auto-stagger conflicting notes, move the note later, or use a separate channel.',0) end
+    end
     local switchTime=R.MIDI_GetProjTimeFromPPQPos(take,s)
     local mode,overlap=keyswitchLengthSettings(a)
     local e
-    if mode=='follow' then e=math.max(onset+1,math.floor(n.e))
+    if mode=='follow' then e=math.max(onset+1,s+1,math.floor(n.e))
     elseif overlap>0 then
      e=math.max(onset+1,round(R.MIDI_GetPPQPosFromProjTime(take,time+overlap/1000)))
     else e=math.min(onset,math.max(s+1,round(R.MIDI_GetPPQPosFromProjTime(take,switchTime+a.length/1000)))) end
@@ -632,7 +677,8 @@ local function plan(take,scene)
  end
  for _,ev in ipairs(ordered) do
   for _,n in ipairs(occupancy[tostring(ev.ch)..':'..ev.p] or {}) do
-   if ev.s<n.e and n.s<ev.e then error('A keyswitch overlaps a musical note of the same pitch and channel.') end
+   local ending=scene.manualEnds[n.idx] or n.e
+   if ev.s<ending and n.s<ev.e then error('A keyswitch overlaps a musical note of the same pitch and channel.') end
   end
  end
  return ordered
@@ -726,18 +772,16 @@ end
 local function findOwnedSwitch(take,scene,n)
  local a=n.a if not a or a.mode=='ch' or n.mute then return end
  local channel=a.kschannel==0 and n.ch or a.kschannel-1
- local time=R.MIDI_GetProjTimeFromPPQPos(take,n.s)
- local earliest=math.floor(R.MIDI_GetPPQPosFromProjTime(take,time-a.lead/1000))-1
  local found
  for _,sw in ipairs(scene.notes) do
-  if sw.generated and sw.ch==channel and sw.p==a.pitch and sw.s>=earliest and sw.s<n.s and (not found or sw.s>found.s) then found=sw end
+  if sw.generated and sw.ch==channel and sw.p==a.pitch and sw.v==a.velocity and switchFits(take,a,n.s,sw.s) and (not found or sw.s>found.s) then found=sw end
  end
  return found and found.key or nil
 end
 local function hasAnyOwnedSwitch(scene,n)
  local a=n.a local channel=a.kschannel==0 and n.ch or a.kschannel-1
- if n.manualSignal and n.manualSignal.pitch==a.pitch then return true end
- for _,sw in ipairs(scene.notes) do if sw.generated and sw.ch==channel and sw.p==a.pitch then return true end end
+ if a.lead>=0 and n.manualSignal and n.manualSignal.pitch==a.pitch and n.manualSignal.velocity==a.velocity then return true end
+ for _,sw in ipairs(scene.notes) do if sw.generated and sw.ch==channel and sw.p==a.pitch and sw.v==a.velocity and (a.lead>=0 or switchFits(scene.take,a,n.s,sw.s)) then return true end end
  return false
 end
 local function restoreStaggerStart(n)
@@ -824,10 +868,8 @@ local function rawKeyNotes(take)
  local rows=keyswitchRows()
  for _,n in ipairs(assignments) do if not rows[n.ch..':'..n.p] then
   local ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1
-  local time=R.MIDI_GetProjTimeFromPPQPos(take,n.s)
-  local earliest=math.floor(R.MIDI_GetPPQPosFromProjTime(take,time-n.a.lead/1000))-1
   for _,sw in ipairs(switches) do
-   if sw.ch==ch and sw.p==n.a.pitch and sw.s>=earliest and sw.s<n.s then state.validOwned[sw.key]=true end
+   if sw.ch==ch and sw.p==n.a.pitch and switchFits(take,n.a,n.s,sw.s) then state.validOwned[sw.key]=true end
   end
  end end
  return state
@@ -908,14 +950,16 @@ local function execute(a,clear,sync,timing,removedKeys)
  for _,n in ipairs(scene.notes) do
   if not n.generated and n.a and n.a.mode~='ch' and not n.mute then
    local explicitRemoval=removedKeys and removedKeys[n.key]==payload(n.a)
-   local orphan=not sync and not hasAnyOwnedSwitch(scene,n)
+   local observed=deletionSnapshot and deletionSnapshot.take==take and deletionSnapshot.notes[n.key]
+   local rebuilding=observed and observed.rebuild and observed.data==payload(n.a)
+   local orphan=not sync and not rebuilding and not hasAnyOwnedSwitch(scene,n)
    if explicitRemoval or orphan then detachAssignment(n) removedMissing=removedMissing+1 end
   end
  end
  if timing then
   for _,n in ipairs(scene.notes) do
    if not n.generated and n.a and n.a.mode~='ch' and n.a.bank==timing.bank then
-    n.a.lead=timing.lead n.a.length=timing.length n.changed=true
+    n.a.lead=n.a.lead<0 and -timing.lead or timing.lead n.a.length=timing.length n.changed=true
    end
   end
  end
@@ -942,9 +986,9 @@ local function execute(a,clear,sync,timing,removedKeys)
  -- while a conflict still exists. Common articulations always restore alignment.
  prepareDefaults(take,scene)
  if not sync and not clear and R.GetExtState(SECTION,'autoStagger')~='1' then
-  for _,n in ipairs(scene.notes) do if n.sel and n.restoredShift and n.restoredShift>0 and n.a then
+  for _,n in ipairs(scene.notes) do if n.sel and n.restoredShift and n.restoredShift>0 and n.a and n.a.lead>=0 then
    for _,other in ipairs(scene.notes) do
-    if other~=n and not other.generated and not other.mute and other.effective and other.ch==n.ch and other.s==n.s and config(other.effective)~=config(n.a) then
+    if other~=n and not other.generated and not other.mute and other.effective and other.effective.lead>=0 and other.ch==n.ch and other.s==n.s and config(other.effective)~=config(n.a) then
      n.s=n.s+n.restoredShift n.a.shift=n.restoredShift break
     end
    end
@@ -1010,23 +1054,26 @@ local function watchDeletedSwitches()
  local ok,scene=pcall(read,take) if not ok then return end
  local present={} for _,n in ipairs(scene.notes) do if n.generated then present[n.key]=true end end
  local missing={}
+ local geometry=musicalGeometry(scene)
+ local structural=deletionSnapshot and deletionSnapshot.take==take and deletionSnapshot.geometry~=geometry
  if deletionSnapshot and deletionSnapshot.take==take then
   for _,n in ipairs(scene.notes) do
    local previous=deletionSnapshot.notes[n.key]
-   if n.a and previous and previous.switch and previous.data==payload(n.a) and not present[previous.switch] then missing[n.key]=previous.data end
+   if not structural and n.a and previous and not previous.rebuild and previous.switch and previous.data==payload(n.a) and not present[previous.switch] then missing[n.key]=previous.data end
   end
  end
  if next(missing) and execute(nil,false,true,nil,missing) then
   local reread,updated=pcall(read,take) if reread then scene=updated end
  end
- local snapshot={take=take,notes={}}
+ local snapshot={take=take,notes={},geometry=musicalGeometry(scene)}
  for _,n in ipairs(scene.notes) do
   if n.a and n.a.mode~='ch' and not n.mute then
    local previous=deletionSnapshot and deletionSnapshot.take==take and deletionSnapshot.notes[n.key]
    local owner=findOwnedSwitch(take,scene,n)
    -- Keep a known physical owner through tempo changes that alter the lead window.
    if not owner and previous and present[previous.switch] and previous.data==payload(n.a) then owner=previous.switch end
-   snapshot.notes[n.key]={data=payload(n.a),switch=owner}
+   local rebuild=not owner and previous and previous.data==payload(n.a) and (previous.rebuild or (structural and previous.switch and not present[previous.switch]))
+   snapshot.notes[n.key]={data=payload(n.a),switch=owner,rebuild=rebuild or nil}
   end
  end
  deletionSnapshot=snapshot
@@ -1233,6 +1280,7 @@ if not R.JS_Composite and not popupMode then
 end
 local host,bitmap,liceFont=nil,nil,nil
 local running=true
+local editorBusy=false
 local box={x=0,y=0,w=140,h=24}
 local fontSize=tonumber(R.GetExtState(SECTION,'boxFont')) or 13
 local boxWidth=tonumber(R.GetExtState(SECTION,'boxWidth')) or 140
@@ -1482,7 +1530,7 @@ local function articulationOrder()
  return order
 end
 local function newArticulation()
- local a=defaults('New articulation','ks',1)
+ local a=defaults('','ks',1)
  a.lead=number(R.GetExtState(SECTION,'timingLead'),0.01,10000,false) or a.lead
  a.length=number(R.GetExtState(SECTION,'timingLength'),0.01,10000,false) or a.length
  local editor=R.MIDIEditor_GetActive()
@@ -1492,54 +1540,112 @@ local function newArticulation()
  return a
 end
 local function editArt(index)
- local a=index and bank().arts[index] or newArticulation()
- local modes={'ch','ks','both'}
- local labels={'MIDI channel','Keyswitch','Channel + keyswitch'}
- for i,mode in ipairs(modes) do if mode==a.mode then labels[i]='!'..labels[i] end end
- local choice=choose(labels) if choice==0 then return end
- local mode=modes[choice] local f
- local entry={} for k,v in pairs(a) do entry[k]=v end entry.mode=mode
- if mode=='ch' then
-  f=prompt('Articulation — MIDI channel','Name,MIDI channel 1–16',table.concat({a.name,a.channel},','),2)
-  if f then entry.name=f[1] entry.channel=tonumber(f[2]) end
- elseif mode=='ks' then
-  f=prompt('Articulation — keyswitch','Name,KS pitch 0–127,Velocity 1–127,Lead time (ms),Length (ms),KS channel 0=note channel',table.concat({a.name,a.pitch,a.velocity,a.lead,a.length,a.kschannel},','),6)
-  if f then entry.name=f[1] entry.pitch=tonumber(f[2]) entry.velocity=tonumber(f[3]) entry.lead=tonumber(f[4]) entry.length=tonumber(f[5]) entry.kschannel=tonumber(f[6]) end
- else
-  f=prompt('Articulation — channel + keyswitch','Name,Note channel 1–16,KS pitch 0–127,Velocity 1–127,Lead time (ms),Length (ms),KS channel 0=note channel',table.concat({a.name,a.channel,a.pitch,a.velocity,a.lead,a.length,a.kschannel},','),7)
-  if f then entry.name=f[1] entry.channel=tonumber(f[2]) entry.pitch=tonumber(f[3]) entry.velocity=tonumber(f[4]) entry.lead=tonumber(f[5]) entry.length=tonumber(f[6]) entry.kschannel=tonumber(f[7]) end
+ if editorBusy then return end
+ local target=bank() local track=bankTrack
+ if R.GetMediaItem_Track and not track then R.MB('Open a MIDI item on the destination track before editing its articulations.','ArticulationBox',0) return end
+ local project=R.EnumProjects and R.EnumProjects(-1,'')
+ local destinationEditor=R.MIDIEditor_GetActive() or host
+ local source=index and target.arts[index] or newArticulation()
+ local entry={} for k,v in pairs(source) do entry[k]=v end
+ local _,path=R.get_action_context()
+ local folder=path:match('^(.*[\\/])') or ''
+ local loaded,openEditor=pcall(dofile,folder..'Articulation_Editor.lua')
+ if not loaded or type(openEditor)~='function' then
+  R.MB('The articulation editor file is missing or could not load. Update the complete ArticulationBox package.\n\n'..tostring(openEditor),'ArticulationBox',0) return
  end
- if not f then return end
- if not valid(entry) then status='Check the MIDI pitch, channel and numeric values.' return end
- if index then bank().arts[index]=entry if bank().default==index and entry.mode=='ch' then bank().default=nil end
- else
-  if bank().name=='Empty bank' and #bank().arts==0 then
-   local name='New bank' local used={} for _,b in ipairs(presets) do used[b.name]=true end
-   local suffix=2 while used[name] do name='New bank '..suffix suffix=suffix+1 end
-   bank().name=name
+ local active=R.GetExtState(SECTION,'activeInstance')
+ local function ready()
+  if project and R.EnumProjects(-1,'')~=project then return false,'Return to the original project before saving this mapping.' end
+  if R.MIDIEditor_GetActive() then loadTrackBanks() end
+  if banks[bankIndex]~=target or bankTrack~=track or (track and not validPointer(track,'MediaTrack*')) then
+   return false,'The active bank changed. Close this window and reopen it for the current track.'
   end
-  bank().arts[#bank().arts+1]=entry
- end save()
+  return true
+ end
+ local function listMappings()
+  local entries={}
+  local order={} for i in ipairs(target.arts) do order[#order+1]=i end
+  table.sort(order,function(i,j) if target.arts[i].pitch~=target.arts[j].pitch then return target.arts[i].pitch>target.arts[j].pitch end return i<j end)
+  for _,i in ipairs(order) do
+   local a=target.arts[i]
+   local entry={} for k,v in pairs(a) do entry[k]=v end
+   entries[#entries+1]={index=i,entry=entry,label=a.name..(a.mode~='ch' and ('  [KS '..a.pitch..', Vel '..a.velocity..']') or ('  [Ch '..a.channel..']'))}
+  end
+  return entries
+ end
+ local function editorState(selected)
+  return {bankName=target.name,entries=listMappings(),selected=selected or 0}
+ end
+ local function updateNames()
+  rowNameSignature=nil rowNamesUpdate(track,target)
+  if destinationEditor and R.JS_Window_IsWindow and R.JS_Window_IsWindow(destinationEditor) and R.JS_Window_InvalidateRect and R.JS_Window_GetClientSize then
+   local view=R.JS_Window_FindChildByID and R.JS_Window_FindChildByID(destinationEditor,1001) or destinationEditor
+   local ok,w,h=R.JS_Window_GetClientSize(view)
+   if ok then R.JS_Window_InvalidateRect(view,0,0,w,h,false) end
+  end
+ end
+ editorBusy=true
+ local opened,ok,err=pcall(openEditor,R,{
+  entry=entry,editing=index~=nil,bankName=target.name,selected=index or 0,entries=listMappings(),
+  isAlive=function() return running and (popupMode or R.GetExtState(SECTION,'activeInstance')==active) end,
+  onClose=function() editorBusy=false end,
+  onSelect=function(selected)
+   local ok,why=ready() if not ok then return nil,why end
+   if selected>0 and not target.arts[selected] then return nil,'This mapping was removed. Reopen the articulation editor.' end
+   index=selected>0 and selected or nil
+   source=index and target.arts[index] or nil
+   local entry={} for k,v in pairs(source or newArticulation()) do entry[k]=v end
+   return entry
+  end,
+  onSave=function(updated,nextEntry)
+   local ok,why=ready() if not ok then return false,why end
+   if not valid(updated) then return false,'Check the MIDI pitch, velocity, channel and timing values.' end
+   if index then
+    if target.arts[index]~=source then return false,'This mapping changed. Close this window and reopen it.' end
+    target.arts[index]=updated source=updated
+    if target.default==index and updated.mode=='ch' then target.default=nil end
+   else
+    if target.name=='Empty bank' and #target.arts==0 then
+     local name='New bank' local used={} for _,b in ipairs(presets) do used[b.name]=true end
+     local suffix=2 while used[name] do name='New bank '..suffix suffix=suffix+1 end
+     target.name=name
+    end
+    target.arts[#target.arts+1]=updated index=#target.arts source=updated
+   end
+   save() updateNames() cachedState=nil refresh=0 currentLabel=nil
+   status=updated.name..' — mapping saved.'
+   if nextEntry then index=nil source=nil end
+   return true,editorState(index)
+  end,
+  onRemove=function()
+   local ok,why=ready() if not ok then return false,why end
+   if not index or target.arts[index]~=source then return false,'Select a saved articulation first.' end
+   if R.MB('Remove articulation mapping “'..source.name..'”? Existing MIDI assignments will be kept.','Remove articulation',4)~=6 then return false end
+   local name=source.name
+   table.remove(target.arts,index)
+   if target.default==index then target.default=nil elseif target.default and target.default>index then target.default=target.default-1 end
+   index=nil source=nil save() updateNames() cachedState=nil refresh=0 currentLabel=nil
+   status=name..' — mapping removed.'
+   local result=editorState() result.entry=newArticulation()
+   return true,result
+  end
+ })
+ if not opened then err=ok ok=false end
+ if not ok then editorBusy=false R.MB(tostring(err),'ArticulationBox',0) end
 end
 local function timingSettings()
- local f=prompt('Keyswitch timing for this bank','Lead time (ms),Length (ms),Overlap after note (ms)',
+ local f=prompt('Keyswitch timing for this bank','Timing distance (ms),Legacy length (ms),Legacy overlap (ms)',
   (R.GetExtState(SECTION,'timingLead')~='' and R.GetExtState(SECTION,'timingLead') or '1')..','..
   (R.GetExtState(SECTION,'timingLength')~='' and R.GetExtState(SECTION,'timingLength') or '1')..','..(R.GetExtState(SECTION,'ksOverlap')~='' and R.GetExtState(SECTION,'ksOverlap') or '1'),3)
  if not f then return end
  local lead,length,overlap=number(f[1],0.01,10000,false),number(f[2],0.01,10000,false),number(f[3],0,10000,false)
- if not lead or not length or not overlap then R.MB('Lead/length: 0.01–10000 ms; overlap: 0–10000 ms.','Keyswitch timing',0) return end
+ if not lead or not length or not overlap then R.MB('Distance/length: 0.01–10000 ms; overlap: 0–10000 ms.','Keyswitch timing',0) return end
  local previous=R.GetExtState(SECTION,'ksOverlap') R.SetExtState(SECTION,'ksOverlap',tostring(overlap),true)
  if not retime(lead,length) then R.SetExtState(SECTION,'ksOverlap',previous,true) R.MB(status,'Keyswitch timing',0) return end
- for _,a in ipairs(bank().arts) do if a.mode~='ch' then a.lead=lead a.length=length end end
+ for _,a in ipairs(bank().arts) do if a.mode~='ch' then a.lead=a.lead<0 and -lead or lead a.length=length end end
  save()
  R.SetExtState(SECTION,'timingLead',tostring(lead),true) R.SetExtState(SECTION,'timingLength',tostring(length),true)
  status='Bank timing saved; existing assignments for this bank in the active take were refreshed.'
-end
-local function pickArtIndex()
- local order=articulationOrder()
- local names={} for _,i in ipairs(order) do names[#names+1]=safeLabel(bank().arts[i].name) end
- if #names==0 then status='This bank has no articulations.' return end
- local n=choose(names) return n>0 and order[n] or nil
 end
 local function export()
  local f=prompt('Export all banks','Full path',R.GetResourcePath()..'/Articulation_Manager_Banks.txt',1) if not f then return end
@@ -1578,11 +1684,6 @@ local function bankDelete()
   for i=#presets,1,-1 do if presets[i].name==name then table.remove(presets,i) end end
   table.remove(banks,bankIndex) if #banks==0 then banks={{name='Empty bank',arts={}}} end bankIndex=1 save(false)
  end
-end
-local function editSelectedArt() local i=pickArtIndex() if i then editArt(i) end end
-local function deleteSelectedArt()
- local i=pickArtIndex()
- if i and R.MB('Remove articulation mapping “'..bank().arts[i].name..'”?','Articulation',4)==6 then table.remove(bank().arts,i) if bank().default==i then bank().default=nil elseif bank().default and bank().default>i then bank().default=bank().default-1 end save() end
 end
 local function sizeSettings()
  local f=prompt('Field size','Width,Height,Font size',boxWidth..','..boxHeight..','..fontSize,3)
@@ -1686,17 +1787,50 @@ local function compileMenu(entries)
 end
 local function noteCount(n) return n..(n==1 and ' note' or ' notes') end
 local function articulationEntries(state)
- local menu={}
- for _,i in ipairs(articulationOrder()) do local a=bank().arts[i]
-  local saved={bank=bank().name} for k,v in pairs(a) do saved[k]=v end
+ local menu,groups,emitted={},{},{}
+ local current=bank()
+ local order=articulationOrder()
+ local function groupKey(a)
+  if a.mode=='ch' then return nil end
+  return table.concat({a.mode,a.mode=='both' and a.channel or 0,a.kschannel,a.pitch},':')
+ end
+ for _,i in ipairs(order) do
+  local a=current.arts[i] local id=groupKey(a)
+  if id then
+   groups[id]=groups[id] or {indices={},velocities={}}
+   local group=groups[id]
+   group.indices[#group.indices+1]=i group.velocities[a.velocity]=true
+  end
+ end
+ for _,group in pairs(groups) do
+  local variants=0 for _ in pairs(group.velocities) do variants=variants+1 end
+  group.enabled=variants>1
+  table.sort(group.indices,function(i,j)
+   if current.arts[i].velocity~=current.arts[j].velocity then return current.arts[i].velocity>current.arts[j].velocity end
+   return i<j
+  end)
+ end
+ local function entry(index,variant)
+  local a=current.arts[index]
+  local saved={bank=current.name} for k,v in pairs(a) do saved[k]=v end
   local bucket=state.buckets[assignmentIdentity(saved)]
   local count=bucket and bucket.count or 0
-  local label=a.name
+  local label=a.name..(variant and ('  [Vel '..a.velocity..']') or '')
   if count>0 and count<state.total then label=label..'  ('..noteCount(count)..')' end
-  local index=i
-  menu[#menu+1]={label=label,checked=count>0,disabled=state.total==0,action=function()
-   if not apply(bank().arts[index]) then R.MB(status,'Articulation',0) end
+  return {label=label,checked=count>0,disabled=state.total==0,action=function()
+   if bank()~=current or current.arts[index]~=a then R.MB('The active bank changed. Open the menu again.','Articulation',0) return end
+   if not apply(a) then R.MB(status,'Articulation',0) end
   end}
+ end
+ for _,i in ipairs(order) do
+  local a=current.arts[i] local id=groupKey(a) local group=id and groups[id]
+  if group and group.enabled then
+   if not emitted[id] then
+    emitted[id]=true
+    local children={} for _,index in ipairs(group.indices) do children[#children+1]=entry(index,true) end
+    menu[#menu+1]={label=current.arts[group.indices[1]].name,children=children}
+   end
+  else menu[#menu+1]=entry(i,false) end
  end
  return menu
 end
@@ -1704,17 +1838,21 @@ end
 local helpTopics={
  {title="Quick start",text=[[1. Open a MIDI item and keep Articulation_Manager.lua running.
 2. Create a bank: Settings > Banks > New.
-3. Add articulation: choose the switching method and enter your instrument's mapping.
+3. Add / Edit articulation: configure mappings in one window. Use Save & Next to build a bank quickly.
 4. Select musical notes, open the field menu and choose an articulation.
 5. Optional: Settings > Default articulation for notes without an override.
 6. Save the REAPER project.
 
 Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for an articulation-only menu at the mouse cursor.]]},
- {title="Articulations and defaults",text=[[MIDI channel: routes musical notes to a channel.
+ {title="Articulations and defaults",text=[[Channel: routes musical notes to a channel.
 Keyswitch: sends a MIDI note that selects a sound in your instrument.
-Channel + keyswitch: combines both methods.
+KS + Channel: combines both methods.
 
-Use the pitch, velocity and channels required by your instrument. KS channel 0 means the musical note's channel. New KS pitch uses the active piano-roll row.
+Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show the relevant parameters. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
+
+Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. Both values remain editable. Save stores changes without closing the window. Save & Next immediately stores a new mapping and prepares another; when editing, it advances to the next saved mapping. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
+
+Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; the highest-velocity name labels the group. Each variant keeps its own name and velocity.
 
 Select notes and choose a name to apply it. Clear articulation removes the explicit override; a configured default can apply again. Defaults require a keyswitch mapping.
 
@@ -1731,16 +1869,18 @@ Removing a bank or mapping does not erase existing MIDI assignments. Use Clear a
 A later switch shortens the earlier keyswitch at its start. Different switches at exactly the same time on one channel remain ambiguous.
 
 Independently editing an automatic keyswitch's pitch, position, length or velocity makes it manual and removes its former automatic links. Musical notes are preserved. Move the musical note instead to keep an automatic link.]]},
- {title="Playback and timing",text=[[Automatic keyswitches start before their musical notes and follow their length, ending sooner if another switch intervenes. Lead time controls the advance. Length and Overlap fields are retained for compatibility; they do not set the final duration in Follow musical note behavior.
+ {title="Playback and timing",text=[[Trigger chooses Before note start or After note start. Delay (ms) sets the distance in milliseconds; Trigger chooses which side of the note start it applies to. Automatic keyswitches end with their musical notes, or sooner if another switch intervenes. Length/Overlap are legacy compatibility values.
 
-Keyswitch timing updates the current bank and its assignments in the active take; new articulations use the saved timing defaults.
+For a loop ending, use After note start and a suitable Delay. KS velocity is independent of musical velocity: a chord with velocity 1 can trigger a keyswitch with velocity 100. The script preserves the chord velocity. MIDI tick resolution can impose a minimum delay.
+
+Keyswitch timing updates the current bank and its assignments in the active take, preserving each mapping's Before/After direction; new articulations use the saved timing defaults.
 
 Chase MIDI note-ons enables REAPER's option to resend sustained notes when playback starts inside them. Test the result with your instrument.
 
 Auto-stagger conflicting notes delays conflicting musical starts slightly and shortens notes by the same amount, keeping their ends fixed. Spacing sets the delay in ms. It does not provide independent simultaneous articulations on one MIDI channel.]]},
  {title="Editing and transposition",text=[[Keep the main script running while editing. Moving or resizing musical notes updates their linked automatic keyswitches. Returning notes to the same articulation can restore starts previously delayed by auto-stagger.
 
-At the item start, a musical note can move slightly later to leave room for its keyswitch; its end stays fixed.
+At the item start, or with auto-stagger enabled when neighboring starts leave no MIDI tick for a switch, a musical note can move slightly later to leave room for a Before keyswitch; its end stays fixed. After keyswitches do not require this advance space.
 
 Broad selection/transposition protects keyswitch pitches while musical notes change pitch. With item/take pitch changes, the script writes the transpose into musical notes and resets the take pitch control, so the P+ value may disappear.
 
@@ -1750,6 +1890,8 @@ Refresh keyswitches rebuilds automatic switches in the active take from assignme
 Clear missing keyswitch assignments removes stale links after switches were deleted; a default may then apply.
 Legacy keyswitches > Find for review selects possible older switches. Review the selection before Remove reviewed; manual switches can match too.
 Status shows the latest operation message.
+
+The parameter editor requires ReaImGui, installed through ReaPack. Restart REAPER after installing the extension.
 
 No sounds change: check the instrument mapping, MIDI channel and velocity. Empty menu: choose this track's bank and add mappings. An articulation-only menu has no settings: use the field or Articulation_Menu_Popup.lua for Help and Settings.]]},
  {title="Field, actions and startup",text=[[Articulation_Manager.lua runs the embedded field and background updates.
@@ -1778,11 +1920,11 @@ local function buildMenu(state)
  menu[#menu+1]={separator=true}
  menu[#menu+1]={label='Clear articulation'..(state.none>0 and state.none<state.total and ('  ('..noteCount(state.none)..')') or ''),checked=state.total>0 and state.none==state.total,disabled=state.total==0,action=clear}
  menu[#menu+1]={separator=true}
- menu[#menu+1]={label='Add articulation…',action=function() editArt() end}
- menu[#menu+1]={label='Edit articulation…',action=editSelectedArt}
- menu[#menu+1]={label='Remove articulation…',action=deleteSelectedArt}
+ menu[#menu+1]={label='Add / Edit articulation…',action=function() editArt() end}
  menu[#menu+1]={separator=true}
- for _,entry in ipairs(articulationEntries(state)) do menu[#menu+1]=entry end
+ local articulationMenu=articulationEntries(state)
+ if #articulationMenu==0 then articulationMenu={{label='No articulations in this bank',disabled=true}} end
+ menu[#menu+1]={label='Articulations',children=articulationMenu}
  local bankEntries={}
  for i,b in ipairs(banks) do local index=i
   bankEntries[#bankEntries+1]={label=b.name,checked=i==bankIndex,action=function() bankIndex=index save(false) end}
@@ -1940,6 +2082,7 @@ if sec and cmd then R.SetToggleCommandState(sec,cmd,1) R.RefreshToolbar2(sec,cmd
 local transposeCheckTime=0
 local function loop()
  if not running or R.GetExtState(SECTION,'activeInstance')~=instanceToken then return end
+ if editorBusy then R.defer(loop) return end
  if R.time_precise()>transposeCheckTime then watchItemTranspose() transposeCheckTime=R.time_precise()+0.20 end
  local editor=R.MIDIEditor_GetActive()
  if editor~=host then unlink() host=editor end
