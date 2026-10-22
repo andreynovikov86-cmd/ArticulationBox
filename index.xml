@@ -7,7 +7,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Compact articulation field for REAPER MIDI Editor. Requires js_ReaScriptAPI, installed separately through ReaPack. Supports per-track banks, keyswitches and MIDI channels. Personal banks are stored outside this package and are not distributed. Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Compact articulation field for REAPER MIDI Editor. Requires js_ReaScriptAPI and ReaImGui, installed separately through ReaPack. Supports per-track banks, keyswitches and MIDI channels. Personal banks are stored outside this package and are not distributed. Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.\par}
 }
 ]]></description>
       </metadata>
@@ -41,6 +41,21 @@ Include detailed English and Russian user guides.]]></changelog>
         <source file="USER_GUIDE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/a79e4d4a0348afa620c92332131ed4edad977ea9/ArticulationBox/USER_GUIDE.md</source>
         <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/a79e4d4a0348afa620c92332131ed4edad977ea9/ArticulationBox/USER_GUIDE_RU.md</source>
         <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/a79e4d4a0348afa620c92332131ed4edad977ea9/ArticulationBox/LICENSE.md</source>
+      </version>
+      <version name="1.0.6" author="Andrey Novikov" time="2026-10-22T11:14:37Z">
+        <changelog><![CDATA[Keep Save open; support Add New, Add variant and next-entry editing.
+Learn existing mapping names/settings and refresh row names on every save.
+Stabilize custom window dragging and use one Delay timing label.
+Preserve overrides while adding chord notes and repair close switch timing.]]></changelog>
+        <source main="main midi_editor">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/Articulation_Manager.lua</source>
+        <source main="midi_editor" file="Articulation_Quick_Menu.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/Articulation_Quick_Menu.lua</source>
+        <source main="midi_editor" file="Articulation_Menu_Popup.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/Articulation_Menu_Popup.lua</source>
+        <source file="Articulation_Editor.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/Articulation_Editor.lua</source>
+        <source file="THIRD_PARTY_NOTICES.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
+        <source file="INSTALL_RU.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/INSTALL_RU.txt</source>
+        <source file="USER_GUIDE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/USER_GUIDE.md</source>
+        <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/USER_GUIDE_RU.md</source>
+        <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/bef689ba82f6d62dcf8515d5736679413b3772a8/ArticulationBox/LICENSE.md</source>
       </version>
     </reapack>
   </category>
