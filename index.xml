@@ -87,6 +87,20 @@ Fix the Controller type button color stack and Add New selection.]]></changelog>
         <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/86224a751f00b9fd153f694de937aa592868edba/ArticulationBox/USER_GUIDE_RU.md</source>
         <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/86224a751f00b9fd153f694de937aa592868edba/ArticulationBox/LICENSE.md</source>
       </version>
+      <version name="1.0.9" author="Andrey Novikov" time="2026-10-29T12:26:44Z">
+        <changelog><![CDATA[Skip repeated note decoding when MIDI and project state are unchanged.
+Avoid project-wide transpose scans and Undo journal work during idle playback.
+Preserve selection, drag-release and bank/settings refresh behavior.]]></changelog>
+        <source main="main midi_editor">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/Articulation_Manager.lua</source>
+        <source main="midi_editor" file="Articulation_Quick_Menu.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/Articulation_Quick_Menu.lua</source>
+        <source main="midi_editor" file="Articulation_Menu_Popup.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/Articulation_Menu_Popup.lua</source>
+        <source file="Articulation_Editor.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/Articulation_Editor.lua</source>
+        <source file="THIRD_PARTY_NOTICES.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
+        <source file="INSTALL_RU.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/INSTALL_RU.txt</source>
+        <source file="USER_GUIDE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/USER_GUIDE.md</source>
+        <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/USER_GUIDE_RU.md</source>
+        <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/0f1ce80d6dcb46a73a8080b4c6a63b919b249bfd/ArticulationBox/LICENSE.md</source>
+      </version>
     </reapack>
   </category>
   <metadata>
