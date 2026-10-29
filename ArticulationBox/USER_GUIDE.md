@@ -23,7 +23,7 @@ KS + Channel: combines both methods.
 
 Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show the relevant parameters. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
 
-Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. Both values remain editable. Save stores changes without closing the window. Save & Next immediately stores a new mapping and prepares another; when editing, it advances to the next saved mapping. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
+Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. An unmapped key switches to Add New with an empty name, so the previous mapping is kept. Both values remain editable. Save stores changes without closing the window. Save & Next stores the current mapping and always switches to Add New with an empty name and the current parameters. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
 
 Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; the highest-velocity name labels the group. Each variant keeps its own name and velocity.
 
@@ -142,7 +142,7 @@ Choose **Keyswitch**, set **Trigger > After note start**, then enter **Delay (ms
 
 For MIDI input, the editor reads incoming note-on pitch and velocity. Piano-roll key clicks use the active row and REAPER’s default note velocity. Captured values remain editable until another key is played. Learning does not insert or record notes.
 
-**Save** keeps the window open. **Save & Next** stores a new mapping and clears its name for another; while editing, it selects the next saved mapping. The saved name remains visible. **Add variant** starts a new mapping with copied parameters and an empty name. Piano-roll names refresh immediately after each save. Closing the editor discards only the current unsaved entry; earlier entries stay saved.
+**Save** keeps the window open. **Save & Next** saves the current mapping and always selects **Add New**, clearing the name and retaining the other parameters. The saved name remains visible. **Add variant** starts a new mapping with copied parameters and an empty name. Piano-roll names refresh immediately after each save. Closing the editor discards only the current unsaved entry; earlier entries stay saved.
 
 ## Example: a default and an exception
 

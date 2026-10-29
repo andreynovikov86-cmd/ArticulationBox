@@ -136,7 +136,16 @@ return function(R,options)
      end
     end
     local match=exact or current or fallback
-    if match and match.index~=selected then selectEntry(match.index) end
+    if match and match.index~=selected then
+     selectEntry(match.index)
+    elseif not match and selected>0 then
+     -- A different, unmapped key starts a new mapping. Do not silently
+     -- repurpose the last saved articulation just because learning is active.
+     local nextEntry=snapshot() nextEntry.name=''
+     if selectEntry(0) then
+      setEntry(nextEntry) drafts[0]=nil
+     else return end
+    end
    end
    entry.pitch=learned
    if learnedVelocity then entry.velocity=learnedVelocity end
@@ -146,20 +155,13 @@ return function(R,options)
   local result,why=candidate()
   if not result then errorText=why return false end
   local previous=selected
-  local saved,message=options.onSave(result,nextEntry and previous==0)
+  local saved,message=options.onSave(result,nextEntry)
   if not saved then errorText=message or 'Could not save the articulation.' return false end
   drafts[previous]=nil updateState(message)
   savedMessage='Saved: '..entry.name errorText=nil
-  if nextEntry and previous==0 then
-   if options.onSelect then options.onSelect(0) end
+  if nextEntry then
    selected=0 drafts[0]=nil
    entry.name='' editing=false first=true variantMode=false
-  elseif nextEntry then
-   local order=options.entries or {}
-   for i,item in ipairs(order) do if item.index==selected then
-    if order[i+1] then selectEntry(order[i+1].index,true) end
-    break
-   end end
   else editing=selected>0 end
   return false
  end

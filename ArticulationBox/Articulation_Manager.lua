@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.6
+-- @version 1.0.7
 -- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
@@ -18,10 +18,9 @@
 --   Personal banks are stored outside this package and are not distributed.
 --   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Keep Save open; support Add New, Add variant and next-entry editing.
---   Learn existing mapping names/settings and refresh row names on every save.
---   Stabilize custom window dragging and use one Delay timing label.
---   Preserve overrides while adding chord notes and repair close switch timing.
+--   Keep background keyswitch updates in the original MIDI Undo/Redo step.
+--   Preserve articulation assignments when notes move or stagger.
+--   Save & Next always selects Add New; an unmapped learned key starts a new entry.
 
 -- ArticulationBox by Andrey Novikov.
 -- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
@@ -686,10 +685,6 @@ end
 local function write(take,scene,events)
  -- Keep note/text indexes stable through the ENTIRE edit, including deletes.
  R.MIDI_DisableSort(take)
- -- Update the musical notes while their original indexes are still valid.
- for _,n in ipairs(scene.notes) do if not n.generated and ((n.oldch and n.ch~=n.oldch) or n.olds) then
-  if not R.MIDI_SetNote(take,n.idx,nil,nil,n.olds and n.s or nil,n.olde and n.e or nil,n.ch,nil,nil,true) then error('MIDI_SetNote failed') end
- end end
  -- Rebuild note-notation records only for notes with our assignment or changed channel.
  local textsToDelete={}
  for _,t in ipairs(scene.texts) do
@@ -698,9 +693,20 @@ local function write(take,scene,events)
  end
  table.sort(textsToDelete,function(a,b) return a>b end)
  for _,idx in ipairs(textsToDelete) do if not R.MIDI_DeleteTextSysexEvt(take,idx) then error('MIDI_DeleteTextSysexEvt failed') end end
+ -- MIDI_SetNote can relocate native NOTE records even with sorting disabled.
+ -- Remove records we will rebuild BEFORE moving their notes, while the saved
+ -- text indexes are valid. Text deletion leaves the note indexes unchanged.
+ for _,n in ipairs(scene.notes) do if not n.generated and ((n.oldch and n.ch~=n.oldch) or n.olds) then
+  if not R.MIDI_SetNote(take,n.idx,nil,nil,n.olds and n.s or nil,n.olde and n.e or nil,n.ch,nil,nil,true) then error('MIDI_SetNote failed') end
+ end end
  local generated={} for idx in pairs(scene.generated) do generated[#generated+1]=idx end
  table.sort(generated,function(a,b) return a>b end)
  for _,idx in ipairs(generated) do if not R.MIDI_DeleteNote(take,idx) then error('MIDI_DeleteNote failed') end end
+ for _,ev in ipairs(events) do
+  if not R.MIDI_InsertNote(take,false,false,ev.s,ev.e,ev.ch,ev.p,ev.v,true) then error('MIDI_InsertNote failed') end
+ end
+ -- Finish all note edits before attaching NOTE records to their final onsets.
+ R.MIDI_Sort(take)
  for _,n in ipairs(scene.notes) do if not n.generated and (n.a or n.changed) then
   local tail=n.extras
   if n.a then tail=appendMarker(tail,payload(n.a)) end
@@ -709,7 +715,6 @@ local function write(take,scene,events)
   end
  end end
  for _,ev in ipairs(events) do
-  if not R.MIDI_InsertNote(take,false,false,ev.s,ev.e,ev.ch,ev.p,ev.v,true) then error('MIDI_InsertNote failed') end
   if not R.MIDI_InsertTextSysexEvt(take,false,false,ev.s,15,'NOTE '..ev.ch..' '..ev.p..' user '..KS..':1') then error('Keyswitch marker failed') end
  end
 end
@@ -719,15 +724,16 @@ local function musicalSignature(n)
  return string.format('%.6f:%.6f:%d:%d:%d:%d:%d',n.s,n.e,n.ch,n.p,n.v,n.sel and 1 or 0,n.mute and 1 or 0)
 end
 local function verifyWrittenNotes(take,scene,events)
+ local function signature(n) return musicalSignature(n)..':'..(n.a and payload(n.a) or '') end
  local expected={} local expectedCount=0
  for _,n in ipairs(scene.notes) do if not n.generated then
-  local id=musicalSignature(n) expected[id]=(expected[id] or 0)+1 expectedCount=expectedCount+1
+  local id=signature(n) expected[id]=(expected[id] or 0)+1 expectedCount=expectedCount+1
  end end
  local actual=read(take) local count,generatedCount=0,0
  for _,n in ipairs(actual.notes) do
   if n.generated then generatedCount=generatedCount+1
   else
-   count=count+1 local id=musicalSignature(n)
+   count=count+1 local id=signature(n)
    if not expected[id] or expected[id]==0 then error('Musical-note integrity check failed. The MIDI edit has been reverted.') end
    expected[id]=expected[id]-1
   end
@@ -832,6 +838,78 @@ local movementSnapshot,musicalGeometry=nil,nil
 local switchesMatch
 local keyswitchGuard=nil
 local deletionSnapshot=nil
+-- Background maintenance belongs to the user's native MIDI edit, rather than
+-- creating another undo point. REAPER stores that edit before the deferred
+-- maintenance runs, so Redo can restore the unmaintained MIDI. Keep bounded,
+-- exact before/after patches for that history entry and replay them silently.
+-- Full raw-MIDI equality prevents a patch from replacing subsequent user edits.
+local automaticHistory={patches={},bytes=0}
+function automaticHistory.key()
+ if not R.Undo_CanUndo2 or not R.GetSetMediaItemTakeInfo_String then return nil end
+ bank()
+ local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
+ local index=R.Undo_GetCurEntry and R.Undo_GetCurEntry(project)
+ local desc=R.Undo_CanUndo2(project) or ''
+ local stamp=index and R.Undo_GetEntryTime and R.Undo_GetEntryTime(project,index) or ''
+ local settings=table.concat({serialize(),R.GetExtState(SECTION,'autoStagger'),R.GetExtState(SECTION,'staggerMs'),R.GetExtState(SECTION,'ksOverlap')},'\n')
+ return project,tostring(index or '')..'\n'..desc..'\n'..stamp..'\n'..settings
+end
+function automaticHistory.remember(take,before,pitchBefore)
+ local project,historyKey=automaticHistory.key() if not project then return end
+ local ok,guid=R.GetSetMediaItemTakeInfo_String(take,'GUID','',false)
+ if not ok or guid=='' then return end
+ local got,after=R.MIDI_GetAllEvts(take,'') if not got then return end
+ local pitchAfter=R.GetMediaItemTakeInfo_Value(take,'D_PITCH')
+ pitchBefore=pitchBefore or pitchAfter
+ if before==after and pitchBefore==pitchAfter then return end
+ local patches=automaticHistory.patches local last=patches[#patches]
+ if last and last.project==project and last.key==historyKey and last.guid==guid and last.after==before and last.pitchAfter==pitchBefore then
+  automaticHistory.bytes=automaticHistory.bytes-#last.after+#after
+  last.after=after last.pitchAfter=pitchAfter last.take=take
+ else
+  patches[#patches+1]={project=project,key=historyKey,guid=guid,take=take,before=before,after=after,pitchBefore=pitchBefore,pitchAfter=pitchAfter}
+  automaticHistory.bytes=automaticHistory.bytes+#before+#after
+ end
+ while #patches>128 or automaticHistory.bytes>32*1024*1024 do
+  local old=table.remove(patches,1) automaticHistory.bytes=automaticHistory.bytes-#old.before-#old.after
+ end
+end
+function automaticHistory.restore()
+ local project,historyKey=automaticHistory.key() if not project then return end
+ local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
+ if changes and automaticHistory.project==project and automaticHistory.historyKey==historyKey and automaticHistory.changes==changes then return end
+ local restored=false
+ for _,patch in ipairs(automaticHistory.patches) do if patch.project==project and patch.key==historyKey then
+  local take=patch.take
+  if not isMidiTake(take,project) then
+   take=nil
+   for i=0,R.CountMediaItems(project)-1 do
+    local item=R.GetMediaItem(project,i)
+    for j=0,R.CountTakes(item)-1 do
+     local candidate=R.GetTake(item,j)
+     if isMidiTake(candidate,project) then
+      local ok,guid=R.GetSetMediaItemTakeInfo_String(candidate,'GUID','',false)
+      if ok and guid==patch.guid then take=candidate break end
+     end
+    end
+    if take then break end
+   end
+  end
+  if take then
+   local ok,guid=R.GetSetMediaItemTakeInfo_String(take,'GUID','',false)
+   local got,raw=R.MIDI_GetAllEvts(take,'')
+   if ok and guid==patch.guid and got and raw==patch.before and R.GetMediaItemTakeInfo_Value(take,'D_PITCH')==patch.pitchBefore then
+    if R.MIDI_SetAllEvts(take,patch.after) and R.SetMediaItemTakeInfo_Value(take,'D_PITCH',patch.pitchAfter) then
+     R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
+     patch.take=take restored=true
+    else R.MIDI_SetAllEvts(take,raw) end
+   end
+  end
+ end end
+ if restored then keyswitchGuard=nil deletionSnapshot=nil movementSnapshot=nil end
+ automaticHistory.project=project automaticHistory.historyKey=historyKey
+ automaticHistory.changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
+end
 local function rawKeyNotes(take)
  local ok,count,_,textCount=R.MIDI_CountEvts(take) if not ok then return nil end
  local state={take=take,count=count,notes={},counts={},onsets={},owned={},owners={},validOwned={}}
@@ -939,11 +1017,11 @@ local function watchKeyswitchRows()
   for id,count in pairs(after.counts) do assert(current.counts[id]==count,'A MIDI note changed while enabling manual editing') end
  end,debug.traceback)
  if not success then R.MIDI_SetAllEvts(take,current.raw) R.MIDI_Sort(take) status='Manual edit metadata could not be updated.'
- else deletionSnapshot=nil status='Manual keyswitch edit preserved.' end
+ else automaticHistory.remember(take,current.raw) deletionSnapshot=nil status='Manual keyswitch edit preserved.' end
  R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  keyswitchGuard=captureKeyswitchGuard(take)
 end
-local function execute(a,clear,sync,timing,removedKeys)
+local function execute(a,clear,sync,timing,removedKeys,background)
  local take=activeTake() if not take then return false end
  local ok,scene=pcall(read,take) if not ok then status=tostring(scene) return false end
  local removedMissing=0
@@ -1007,11 +1085,13 @@ local function execute(a,clear,sync,timing,removedKeys)
   if ending then n.olds=n.olds or n.s n.olde=n.olde or n.e n.e=ending n.changed=true end
  end
  local got,backup=R.MIDI_GetAllEvts(take,'') if not got then status='Could not back up MIDI.' return false end
- R.Undo_BeginBlock()
+ if not background then R.Undo_BeginBlock() end
  local success,err=xpcall(function() write(take,scene,events) R.MIDI_Sort(take) verifyWrittenNotes(take,scene,events) end,debug.traceback)
  if not success then R.MIDI_SetAllEvts(take,backup) end
  R.MIDI_Sort(take) R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
- R.Undo_EndBlock(removedKeys and 'Clear deleted keyswitch assignments' or timing and 'Change keyswitch timing' or sync and 'Refresh keyswitches' or clear and 'Clear articulation' or 'Replace articulation: '..a.name,-1)
+ if not background then
+  R.Undo_EndBlock(removedKeys and 'Clear deleted keyswitch assignments' or timing and 'Change keyswitch timing' or sync and 'Refresh keyswitches' or clear and 'Clear articulation' or 'Replace articulation: '..a.name,-1)
+ elseif success then automaticHistory.remember(take,backup) end
  if not success then status='Changes reverted after a MIDI error.' R.MB(tostring(err),'Articulation Manager',0) return false end
  editGeneration=editGeneration+1
  keyswitchGuard=captureKeyswitchGuard(take)
@@ -1023,7 +1103,7 @@ local function execute(a,clear,sync,timing,removedKeys)
 end
 local function apply(a) return execute(a,false,false) end
 local function clear() return execute(nil,true,false) end
-local function sync(dropOrphans)
+local function sync(dropOrphans,background)
  local missing
  if dropOrphans then
   local take=activeTake() if not take then return false end
@@ -1034,7 +1114,7 @@ local function sync(dropOrphans)
   end
   if not next(missing) then missing=nil end
  end
- return execute(nil,false,true,nil,missing)
+ return execute(nil,false,true,nil,missing,background)
 end
 local function retime(lead,length) return execute(nil,false,true,{lead=lead,length=length,bank=bank().name}) end
 local function clearMissingAssignments()
@@ -1062,7 +1142,7 @@ local function watchDeletedSwitches()
    if not structural and n.a and previous and not previous.rebuild and previous.switch and previous.data==payload(n.a) and not present[previous.switch] then missing[n.key]=previous.data end
   end
  end
- if next(missing) and execute(nil,false,true,nil,missing) then
+ if next(missing) and execute(nil,false,true,nil,missing,true) then
   local reread,updated=pcall(read,take) if reread then scene=updated end
  end
  local snapshot={take=take,notes={},geometry=musicalGeometry(scene)}
@@ -1114,7 +1194,7 @@ local function watchMusicalEdits()
  local previous=movementSnapshot
  if overlap or needsDefaultAssignments(scene) or (previous and previous.take==take and previous.generation==editGeneration and previous.signature~=signature) then
   local planned,events=pcall(plan,take,scene)
-  if (needsDefaultAssignments(scene) or not planned or next(scene.manualEnds or {}) or not switchesMatch(scene,events)) and sync() then
+  if (needsDefaultAssignments(scene) or not planned or next(scene.manualEnds or {}) or not switchesMatch(scene,events)) and sync(false,true) then
    local reread,updated=pcall(read,take) if reread then signature=musicalGeometry(updated) end
   end
  end
@@ -1150,6 +1230,7 @@ local function protectKeyswitchSelectionAndPitch()
    end,debug.traceback)
    if not success then R.MIDI_SetAllEvts(take,backup) R.MIDI_Sort(take) return end
    R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
+   automaticHistory.remember(take,backup)
   end
  end
  -- Also repair a transpose performed before the observer could deselect the
@@ -1160,7 +1241,7 @@ local function protectKeyswitchSelectionAndPitch()
  for _,n in ipairs(scene.notes) do if n.generated then
   local pitch=expected[key(n.s,n.ch,0)]
   if musicalSelected and pitch and pitch~=n.p then
-   if sync() then deletionSnapshot=nil end
+   if sync(false,true) then deletionSnapshot=nil end
    return
   end
  end end
@@ -1209,6 +1290,7 @@ local function bakeProtectedTakePitch(take)
   R.SetMediaItemTakeInfo_Value(take,'D_PITCH',0)
   status='Transpose cancelled after a MIDI error; the original notes were preserved.'
  else
+  automaticHistory.remember(take,backup,pitch)
   editGeneration=editGeneration+1
   if movementSnapshot and movementSnapshot.take==take then movementSnapshot=nil end
   if deletionSnapshot and deletionSnapshot.take==take then deletionSnapshot=nil end
@@ -2083,7 +2165,7 @@ local transposeCheckTime=0
 local function loop()
  if not running or R.GetExtState(SECTION,'activeInstance')~=instanceToken then return end
  if editorBusy then R.defer(loop) return end
- if R.time_precise()>transposeCheckTime then watchItemTranspose() transposeCheckTime=R.time_precise()+0.20 end
+ if R.time_precise()>transposeCheckTime then automaticHistory.restore() watchItemTranspose() transposeCheckTime=R.time_precise()+0.20 end
  local editor=R.MIDIEditor_GetActive()
  if editor~=host then unlink() host=editor end
  if host and R.JS_Window_IsWindow(host) then
@@ -2095,7 +2177,7 @@ local function loop()
     if bitmap then R.JS_Composite_Unlink(host,bitmap,true) end
     box.x=bx box.y=by box.w=boxWidth box.h=boxHeight currentLabel=nil
    end
-   if R.time_precise()>refresh then watchKeyswitchRows() protectKeyswitchSelectionAndPitch() watchDeletedSwitches() watchMusicalEdits() rowNamesUpdate() cachedState=selectionState() refresh=R.time_precise()+0.20 end
+   if R.time_precise()>refresh then automaticHistory.restore() watchKeyswitchRows() protectKeyswitchSelectionAndPitch() watchDeletedSwitches() watchMusicalEdits() rowNamesUpdate() cachedState=selectionState() refresh=R.time_precise()+0.20 end
    local sx,sy=R.GetMousePosition()
    local mx,my=R.JS_Window_ScreenToClient(host,sx,sy)
    local mouseWindow=R.JS_Window_FromPoint(sx,sy)
