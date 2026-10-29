@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.8
+-- @version 1.0.9
 -- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
@@ -18,11 +18,9 @@
 --   Personal banks are stored outside this package and are not distributed.
 --   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Add independent Controller presets and optional linked articulation controllers.
---   Support Pitch Bend and CC with full-note, note-start and note-end timing.
---   Keep controller movement, boundary room and item tails in MIDI Undo/Redo.
---   Add Reset controllers to ready menus without changing articulations.
---   Fix the Controller type button color stack and Add New selection.
+--   Skip repeated note decoding when MIDI and project state are unchanged.
+--   Avoid project-wide transpose scans and Undo journal work during idle playback.
+--   Preserve selection, drag-release and bank/settings refresh behavior.
 
 -- ArticulationBox by Andrey Novikov.
 -- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
@@ -1103,6 +1101,10 @@ function automaticHistory.remember(take,before,pitchBefore,lengthBefore)
  end
 end
 function automaticHistory.restore()
+ if #automaticHistory.patches==0 then return end
+ local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
+ local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
+ if changes and automaticHistory.project==project and automaticHistory.changes==changes then return end
  local project,historyKey=automaticHistory.key() if not project then return end
  local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
  if changes and automaticHistory.project==project and automaticHistory.historyKey==historyKey and automaticHistory.changes==changes then return end
@@ -1557,6 +1559,8 @@ local function watchItemTranspose()
  if not R.GetMediaItemTakeInfo_Value or not R.SetMediaItemTakeInfo_Value or not R.CountMediaItems or not R.CountTakes then return end
  if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then return end
  local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
+ local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
+ if changes and automaticHistory.transposeSnapshot and automaticHistory.transposeSnapshot.project==project and automaticHistory.transposeSnapshot.changes==changes then return end
  for i=0,R.CountMediaItems(project)-1 do
   local item=R.GetMediaItem(project,i)
   if validPointer(item,'MediaItem*',project) then
@@ -1567,6 +1571,7 @@ local function watchItemTranspose()
    end
   end
  end
+ automaticHistory.transposeSnapshot={project=project,changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)}
 end
 local cleanupPreview=nil
 local function noteSignature(n) return table.concat({n.s,n.e,n.ch,n.p,n.v,tostring(n.mute)},'/') end
@@ -1796,6 +1801,33 @@ local function selectionState()
  if #state.order==1 and state.buckets[state.order[1]].count==state.total then state.label=state.buckets[state.order[1]].a.name
  elseif #state.order>0 then state.label='Mixed' end
  return state
+end
+-- Scrolling and playback do not change MIDI. Keep the last field state instead
+-- of decoding every note and notation marker through every observer each poll.
+automaticHistory.observerState={}
+function automaticHistory.observerStamp()
+ local take=activeTake() if not take then return nil end
+ local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
+ -- Raw event bytes include selection and notation flags as well as notes/CC.
+ -- One native read avoids all Lua decoding when only the view or playhead moves.
+ local ok,data=R.MIDI_GetAllEvts(take,'')
+ if not ok then return nil end
+ local current=bank()
+ local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
+ local settings=table.concat({tostring(bankIndex),R.GetExtState(SECTION,'autoStagger'),R.GetExtState(SECTION,'staggerMs'),R.GetExtState(SECTION,'ksOverlap'),R.GetExtState(SECTION,'ksLengthMode'),R.GetExtState(SECTION,'nameKeyswitchRows')},'\n')
+ return {take=take,project=project,data=data,bank=current,banks=loadedBankData,settings=settings,changes=changes}
+end
+function automaticHistory.pollObservers(force)
+ if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then automaticHistory.observerState.pending=true return end
+ local current=automaticHistory.observerStamp()
+ if not current then automaticHistory.observerState={} return end
+ local previous=automaticHistory.observerState
+ if not force and not previous.pending and previous.take==current.take and previous.project==current.project
+  and previous.data==current.data and previous.bank==current.bank and previous.banks==current.banks
+  and previous.settings==current.settings and previous.changes==current.changes then return end
+ watchKeyswitchRows() protectKeyswitchSelectionAndPitch() watchDeletedSwitches() watchMusicalEdits()
+ rowNamesUpdate() cachedState=selectionState()
+ automaticHistory.observerState=automaticHistory.observerStamp() or {}
 end
 local function releaseIntercepts()
  if host and R.JS_Window_IsWindow(host) then
@@ -2509,7 +2541,7 @@ local function loop()
     if bitmap then R.JS_Composite_Unlink(host,bitmap,true) end
     box.x=bx box.y=by box.w=boxWidth box.h=boxHeight currentLabel=nil
    end
-   if R.time_precise()>refresh then automaticHistory.restore() watchKeyswitchRows() protectKeyswitchSelectionAndPitch() watchDeletedSwitches() watchMusicalEdits() rowNamesUpdate() cachedState=selectionState() refresh=R.time_precise()+0.20 end
+   if R.time_precise()>refresh then automaticHistory.pollObservers(cachedState==nil) refresh=R.time_precise()+0.20 end
    local sx,sy=R.GetMousePosition()
    local mx,my=R.JS_Window_ScreenToClient(host,sx,sy)
    local mouseWindow=R.JS_Window_FromPoint(sx,sy)
