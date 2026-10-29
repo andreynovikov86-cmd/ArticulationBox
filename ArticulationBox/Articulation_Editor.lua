@@ -14,7 +14,7 @@ return function(R,options)
  local font=I.CreateFont('sans-serif',14)
  I.Attach(ctx,font)
  local entry={} for k,v in pairs(options.entry) do entry[k]=v end
- local mode=entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
+ local mode=entry.mode=='controller' and 3 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
  local after=entry.lead<0 and 1 or 0
  local distance=math.abs(entry.lead)
  local function savedSize(key,fallback,lo,hi)
@@ -32,6 +32,19 @@ return function(R,options)
  local channels={} for n=1,16 do channels[#channels+1]=tostring(n) end
  channels=table.concat(channels,'\0')..'\0'
  local ksChannels='0 — Note channel\0'..channels
+ local controlNames={[0]='Bank Select',[1]='Mod Wheel',[2]='Breath',[4]='Foot Pedal',[5]='Portamento Time',[6]='Data Entry',[7]='Volume',[8]='Balance',[10]='Pan',[11]='Expression',[64]='Hold Pedal',[65]='Portamento',[66]='Sostenuto',[67]='Soft Pedal',[68]='Legato',[69]='Hold 2',[71]='Resonance',[72]='Release',[73]='Attack',[74]='Brightness',[91]='Reverb',[93]='Chorus'}
+ local controlLabels={'Pitch Bend','Mod Wheel (CC 1)','Hold Pedal (CC 64)','None'}
+ local controlValues={-1,1,64,-2}
+ for cc=0,127 do if cc~=1 and cc~=64 then
+  controlLabels[#controlLabels+1]='CC '..cc..(controlNames[cc] and (' — '..controlNames[cc]) or '')
+  controlValues[#controlValues+1]=cc
+ end end
+ local function initControl(a)
+  a.ctrl=a.ctrl or 'none' a.ctrlCC=a.ctrlCC or 1 a.ctrlValue=a.ctrlValue or 0
+  a.ctrlChannel=a.ctrlChannel or 0 a.ctrlTiming=a.ctrlTiming or 'full'
+  a.ctrlLead=a.ctrlLead or 0.1 a.ctrlTail=a.ctrlTail or 0.1 a.ctrlReset=a.ctrlReset or 0
+ end
+ initControl(entry)
  local function finish()
   if closed then return end
   closed=true
@@ -45,15 +58,16 @@ return function(R,options)
  local function integer(value,lo,hi) return type(value)=='number' and value%1==0 and value>=lo and value<=hi end
  local function snapshot()
   local result={} for k,v in pairs(entry) do result[k]=v end
-  result.mode=({'ch','ks','both'})[mode+1]
+  result.mode=({'ch','ks','both','controller'})[mode+1]
   result.lead=after==1 and -distance or distance
   return result
  end
  local function setEntry(updated)
   entry={} for k,v in pairs(updated) do entry[k]=v end
-  mode=entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
+  initControl(entry)
+  mode=entry.mode=='controller' and 3 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
   after=entry.lead<0 and 1 or 0 distance=math.abs(entry.lead)
-  editing=selected>0 first=true errorText=nil
+  editing=selected~=0 first=true errorText=nil
  end
  local function updateState(state)
   if type(state)~='table' then return end
@@ -63,10 +77,12 @@ return function(R,options)
  end
  local function selectEntry(index,preserveMessage)
   if not options.onSelect then return false end
+  local controllerDraft=index==0 and mode==3 and snapshot() or nil
+  if controllerDraft then controllerDraft.name='' end
   local updated,why=options.onSelect(index)
   if not updated then errorText=why or 'Could not open the articulation.' return false end
   drafts[selected]=snapshot() selected=index
-  setEntry(drafts[index] or updated)
+  setEntry(controllerDraft or drafts[index] or updated)
   variantMode=false
   if not preserveMessage then savedMessage=nil end
   return true
@@ -79,6 +95,13 @@ return function(R,options)
   if not integer(entry.kschannel,0,16) then return nil,'KS channel must be between 0 and 16.' end
   if not distance or distance~=distance or distance<0.01 or distance>10000 then return nil,'Timing distance must be between 0.01 and 10000 ms.' end
   if not entry.length or entry.length~=entry.length or entry.length<0.01 or entry.length>10000 then return nil,'KS length must be between 0.01 and 10000 ms.' end
+  if mode==3 and entry.ctrl=='none' then return nil,'Choose a controller.' end
+  if entry.ctrl~='none' then
+   local low,high=entry.ctrl=='pitch' and -8192 or 0,entry.ctrl=='pitch' and 8191 or 127
+   if not integer(entry.ctrlValue,low,high) or not integer(entry.ctrlReset,low,high) then return nil,'Check the controller value and reset value.' end
+   if not integer(entry.ctrlCC,0,127) or not integer(entry.ctrlChannel,0,16) then return nil,'Check the controller number and channel.' end
+   for _,v in ipairs({entry.ctrlLead,entry.ctrlTail}) do if type(v)~='number' or v~=v or v<0.01 or v>10000 then return nil,'Controller timing must be between 0.01 and 10000 ms.' end end
+  end
   return snapshot()
  end
  -- Read incoming note-ons only; never record, insert or audition a note here.
@@ -124,7 +147,7 @@ return function(R,options)
    end
    lastRow=row
   end
-  if mode~=0 and learned then
+  if (mode==1 or mode==2) and learned then
    if not variantMode and options.onSelect then
     local fallback,current,exact
     for _,item in ipairs(options.entries or {}) do
@@ -162,7 +185,7 @@ return function(R,options)
   if nextEntry then
    selected=0 drafts[0]=nil
    entry.name='' editing=false first=true variantMode=false
-  else editing=selected>0 end
+  else editing=selected~=0 end
   return false
  end
  local function row(label,draw)
@@ -173,7 +196,12 @@ return function(R,options)
   local close=false
   local focusName=first first=false
   I.SetNextWindowSize(ctx,windowWidth,windowHeight,I.Cond_Appearing)
-  I.SetNextWindowSizeConstraints(ctx,380,mode==2 and 460 or 430,800,900)
+  local minimum=mode==2 and 460 or 430
+  if options.allowControllers then
+   local rows=(mode==3 and 0 or mode==0 and 1 or mode==2 and 6 or 5)+1+(entry.ctrl~='none' and 6 or 0)
+   minimum=math.max(430,300+rows*25+(selected~=0 and 35 or 0))
+  end
+  I.SetNextWindowSizeConstraints(ctx,380,minimum,800,900)
   if windowDrag then
    if I.IsMouseDown(ctx,0) then
     local mx,my=I.GetMousePos(ctx)
@@ -217,7 +245,7 @@ return function(R,options)
    I.DrawList_AddCircleFilled(drawList,cx,cy,7,0xFF5F57FF,32)
    I.DrawList_AddQuadFilled(drawList,cx-3,cy-1.8,cx-1.8,cy-3,cx+3,cy+1.8,cx+1.8,cy+3,0x72120EFF)
    I.DrawList_AddQuadFilled(drawList,cx-3,cy+1.8,cx-1.8,cy+3,cx+3,cy-1.8,cx+1.8,cy-3,0x72120EFF)
-   I.DrawList_AddText(drawList,x+23,y+1,0xEEEEEEFF,'Add / Edit articulation')
+   I.DrawList_AddText(drawList,x+23,y+1,0xEEEEEEFF,mode==3 and 'Add / Edit controller' or 'Add / Edit articulation')
    I.Separator(ctx) I.Spacing(ctx)
    I.PushTextWrapPos(ctx,0)
    I.TextDisabled(ctx,'Bank: '..(options.bankName or ''))
@@ -229,7 +257,7 @@ return function(R,options)
      labels[#labels+1]=item.label:gsub('%z',' ') indices[#indices+1]=item.index
      if item.index==selected then choice=#indices-1 end
     end
-    row('Articulation',function()
+    row(mode==3 and 'Controller preset' or 'Articulation',function()
      local nextChoice
      changed,nextChoice=I.Combo(ctx,'##articulation',choice,table.concat(labels,'\0')..'\0')
      if changed and nextChoice~=choice then
@@ -242,34 +270,75 @@ return function(R,options)
     changed,entry.name=I.InputText(ctx,'##name',entry.name)
    end)
    I.Spacing(ctx)
-   I.Text(ctx,'Articulation type (choose one)')
-   local buttonWidth=(I.GetContentRegionAvail(ctx)-16)/3
-   for i,label in ipairs({'Keyswitch','Channel','KS + Channel'}) do
-    local value=({1,0,2})[i]
-    if i>1 then I.SameLine(ctx) end
-    local selected=mode==value
-    if selected then I.PushStyleColor(ctx,I.Col_Button,0x7750BAFF) end
-    if I.Button(ctx,label,buttonWidth,29) then mode=value end
-    if selected then I.PopStyleColor(ctx) end
+   I.Text(ctx,options.allowControllers and 'Type (choose one)' or 'Articulation type (choose one)')
+   local typeLabels=options.allowControllers and {'Keyswitch','Channel','KS + Channel','Controller'} or {'Keyswitch','Channel','KS + Channel'}
+   local columns=options.allowControllers and 2 or 3
+   local buttonWidth=(I.GetContentRegionAvail(ctx)-(columns-1)*8)/columns
+   for i,label in ipairs(typeLabels) do
+    local value=({1,0,2,3})[i]
+    if (i-1)%columns~=0 then I.SameLine(ctx) end
+    local isSelected=mode==value
+    if isSelected then I.PushStyleColor(ctx,I.Col_Button,0x7750BAFF) end
+    if I.Button(ctx,label,buttonWidth,29) then
+     if (value==3)~=(mode==3) then
+      local copy=snapshot() copy.name='' copy.mode=({'ch','ks','both','controller'})[value+1]
+      if not options.onSelect or selectEntry(0,true) then
+       selected=0 drafts[0]=nil setEntry(copy)
+      end
+     end
+     mode=value
+     if mode==3 and entry.ctrl=='none' then entry.ctrl='pitch' entry.ctrlValue=0 entry.ctrlReset=0 end
+    end
+    if isSelected then I.PopStyleColor(ctx) end
    end
    I.Spacing(ctx)
-    if mode~=1 then
+    if mode==0 or mode==2 then
      row('Channel',function()
       local n
       changed,n=I.Combo(ctx,'##noteChannel',entry.channel-1,channels)
       entry.channel=n+1
      end)
     end
-    if mode~=0 then
+    if mode==1 or mode==2 then
     row('KS note (auto)',function() changed,entry.pitch=I.InputInt(ctx,'##pitch',entry.pitch,1,12) end)
     row('KS velocity (1–127)',function() changed,entry.velocity=I.InputInt(ctx,'##velocity',entry.velocity,1,10) end)
     row('KS channel',function() changed,entry.kschannel=I.Combo(ctx,'##ksChannel',entry.kschannel,ksChannels) end)
     row('Trigger',function() changed,after=I.Combo(ctx,'##trigger',after,'Before note start\0After note start\0') end)
     row('Delay (ms)',function() changed,distance=I.InputDouble(ctx,'##distance',distance,0.1,1,'%.2f') end)
     end
+   if options.allowControllers then
+    I.Spacing(ctx)
+    row('Controller',function()
+     local choice=3
+     for i,v in ipairs(controlValues) do if (entry.ctrl=='pitch' and v==-1) or (entry.ctrl=='cc' and v==entry.ctrlCC) then choice=i-1 break end end
+     local nextChoice
+     changed,nextChoice=I.Combo(ctx,'##controller',choice,table.concat(controlLabels,'\0')..'\0')
+     if changed and nextChoice~=choice then
+      local value=controlValues[nextChoice+1]
+      entry.ctrl=value==-2 and 'none' or value==-1 and 'pitch' or 'cc'
+      entry.ctrlCC=value>=0 and value or 1
+      entry.ctrlValue=value==-1 and 0 or 127 entry.ctrlReset=0
+     end
+    end)
+    if entry.ctrl~='none' then
+     local pitch=entry.ctrl=='pitch'
+     row(pitch and 'Bend (-8192–8191)' or 'Value (0–127)',function() changed,entry.ctrlValue=I.InputInt(ctx,'##ctrlValue',entry.ctrlValue,1,pitch and 1024 or 10) end)
+     row('Control channel',function() changed,entry.ctrlChannel=I.Combo(ctx,'##ctrlChannel',entry.ctrlChannel,ksChannels) end)
+     row('Length',function()
+      local value=entry.ctrlTiming=='start' and 1 or entry.ctrlTiming=='end' and 2 or 0
+      changed,value=I.Combo(ctx,'##ctrlTiming',value,'Full note\0Note start\0Note end\0')
+      entry.ctrlTiming=({'full','start','end'})[value+1]
+     end)
+     row('Before (ms)',function() changed,entry.ctrlLead=I.InputDouble(ctx,'##ctrlLead',entry.ctrlLead,0.1,1,'%.2f') end)
+     row('After (ms)',function() changed,entry.ctrlTail=I.InputDouble(ctx,'##ctrlTail',entry.ctrlTail,0.1,1,'%.2f') end)
+     row('Reset value',function() changed,entry.ctrlReset=I.InputInt(ctx,'##ctrlReset',entry.ctrlReset,1,pitch and 1024 or 10) end)
+    end
+   end
    I.Spacing(ctx)
    I.Separator(ctx)
-   if mode==0 then
+   if mode==3 then
+    I.TextDisabled(ctx,savedMessage or 'Save this controller for the Controller menu.')
+   elseif mode==0 then
     I.TextDisabled(ctx,savedMessage or 'Musical velocity stays unchanged.')
    else
     I.TextDisabled(ctx,savedMessage or 'Play a MIDI key or click a piano-roll key.')
@@ -279,7 +348,7 @@ return function(R,options)
     I.Spacing(ctx) I.PushStyleColor(ctx,I.Col_Text,0xFF9B8CFF)
     I.TextWrapped(ctx,errorText) I.PopStyleColor(ctx)
    end
-   if selected>0 and options.onRemove then
+   if selected~=0 and options.onRemove then
     I.Spacing(ctx)
     if I.Button(ctx,'Add variant',130,0) then
      local copy=snapshot() local sourceName=entry.name
@@ -289,7 +358,7 @@ return function(R,options)
      end
     end
     I.SameLine(ctx)
-    if I.Button(ctx,'Remove articulation',160,0) then
+    if I.Button(ctx,selected<0 and 'Remove controller' or 'Remove articulation',160,0) then
      local removed,state=options.onRemove()
      if removed then
       drafts={} updateState(state) setEntry(state.entry) savedMessage='Articulation removed.'

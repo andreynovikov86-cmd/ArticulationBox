@@ -34,7 +34,7 @@ For a full installation guide in Russian, see [INSTALL_RU](ArticulationBox/INSTA
 
 ## Articulation editor
 
-Add / Edit articulation uses one compact, resizable window with **Keyswitch**, **Channel**, and **KS + Channel** choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. **Save & Next** builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.
+Add / Edit articulation uses one compact, resizable window with **Keyswitch**, **Channel**, **KS + Channel**, and **Controller** choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. **Save & Next** builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.
 
 Choose **Before note start** or **After note start** and set Delay in milliseconds. A delayed keyswitch can trigger a loop ending after a chord starts, with independent keyswitch velocity. Automatic keyswitches still follow the musical note’s end.
 
@@ -57,3 +57,7 @@ To publish a new release, change the package code, increase `@version` in `Artic
 ArticulationBox is licensed under the [MIT License](LICENSE.md), which permits use, modification and redistribution, including commercial use, with the required copyright and license notices.
 
 Adapted Gridbox code retains its original MIT copyright and license notice in [THIRD_PARTY_NOTICES](ArticulationBox/THIRD_PARTY_NOTICES.txt). Both notices are included in the ReaPack package.
+
+### Controllers
+
+Save Pitch Bend or any CC as an independent named preset, or attach it to an articulation. Ready menus show **Controller** when presets are available or assigned controllers can be reset. **Reset controllers** clears controllers from selected notes while preserving articulations. Choose **Full note**, **Note start**, or **Note end**, with Before/After margins and a reset value. Pitch Bend, Mod Wheel and Hold Pedal appear first in the chooser. Controllers follow note edits and Undo/Redo; see the [user guide](ArticulationBox/USER_GUIDE.md#controllers).

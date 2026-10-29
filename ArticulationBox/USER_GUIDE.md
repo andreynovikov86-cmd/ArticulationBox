@@ -2,7 +2,7 @@
 
 **English** · [Русский](USER_GUIDE_RU.md) · [Repository](https://github.com/andreynovikov86-cmd/ArticulationBox)
 
-Open **Help** in the field's full menu for short explanations without an internet connection. The quick articulation menu intentionally contains only articulation choices. The full menu keeps these choices under Articulations to remain short with large banks.
+Open **Help** in the field's full menu for short explanations without an internet connection. The quick menu contains ready articulation choices and saved independent Controller presets. The full menu keeps these choices under Articulations to remain short with large banks.
 
 ## 1. Quick start
 
@@ -13,7 +13,7 @@ Open **Help** in the field's full menu for short explanations without an interne
 5. Optional: Settings > Default articulation for notes without an override.
 6. Save the REAPER project.
 
-Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for an articulation-only menu at the mouse cursor.
+Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for ready articulation and controller choices at the mouse cursor.
 
 ## 2. Articulations and defaults
 
@@ -21,7 +21,7 @@ Channel: routes musical notes to a channel.
 Keyswitch: sends a MIDI note that selects a sound in your instrument.
 KS + Channel: combines both methods.
 
-Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show the relevant parameters. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
+Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show their relevant parameters and can include a linked Controller. The fourth type, Controller, saves an independent preset. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
 
 Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. An unmapped key switches to Add New with an empty name, so the previous mapping is kept. Both values remain editable. Save stores changes without closing the window. Save & Next stores the current mapping and always switches to Add New with an empty name and the current parameters. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
 
@@ -149,3 +149,17 @@ For MIDI input, the editor reads incoming note-on pitch and velocity. Piano-roll
 Choose your sustained articulation under **Settings > Default articulation**. Select a few musical notes and apply Staccato. Notes without an explicit override use the default again at their starts, except where a manually drawn switch intentionally controls the channel. A default cannot provide a different simultaneous sound to another note on the same channel: use suitable instrument routing or auto-stagger where appropriate.
 
 Automatic following, default maintenance, overlap trimming and pitch protection require the main script to remain running. Save projects and export banks before transferring your setup to another computer.
+
+## Controllers
+
+Choose Controller in Add / Edit articulation to save a named, independent preset. It appears under Controller in the full and quick menus. This submenu is also available to reset controllers linked to articulations or assigned to selected notes. Applying it preserves the selected notes' articulation. Other articulation types can include a linked Controller; choose None to leave it disabled.
+
+The chooser starts with Pitch Bend, Mod Wheel (CC 1) and Hold Pedal (CC 64), followed by the other CC numbers. CC values range from 0 to 127. Pitch Bend ranges from -8192 to 8191, with 0 at center. Hold Pedal normally uses 127 to hold and reset 0 to release.
+
+Length: Full note sets the value before note-on and resets after note-off. Note start makes a short pulse across note-on. Note end sets the value while the note is still held and resets after note-off. Before and After set these margins in milliseconds, with at least one MIDI tick on either side. Reset value is the value sent at the end. Control channel 0 follows the musical note's channel.
+
+Controllers follow musical note moves and length edits while the manager runs. At the item start, a note may move slightly later to leave room; at the end, the item may extend to play the reset. Undo/Redo keeps these changes together.
+
+Controllers affect every sounding voice on their MIDI channel. Overlapping notes cannot have independent controller states on the same channel. A later assignment on the same controller lane replaces its earlier state. An independent preset overrides a linked controller on that lane until the articulation is applied again. Other controller lanes remain assigned.
+
+**Controller > Reset controllers** removes all controller assignments from selected notes while preserving their articulation. It is disabled when no selected notes have controllers. Settings > Clear controller assignments provides the same operation. Removing a preset from the bank preserves existing MIDI assignments. Controller presets are saved with this track's bank.
