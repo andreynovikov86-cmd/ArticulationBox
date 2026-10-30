@@ -8,9 +8,9 @@ Open **Help** in the field's full menu for short explanations without an interne
 
 1. Open a MIDI item and keep Articulation_Manager.lua running.
 2. Create a bank: Settings > Banks > New.
-3. Add / Edit articulation: configure mappings in one window. Use Save & Next to build a bank quickly.
+3. Add / Edit articulation: if Empty bank is selected, create a named bank first. Then configure mappings. Use Save & Next to build a bank quickly.
 4. Select musical notes, open the field menu and choose an articulation.
-5. Optional: Settings > Default articulation for notes without an override.
+5. Optional: Default articulation for notes without an override.
 6. Save the REAPER project.
 
 Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for ready articulation and controller choices at the mouse cursor.
@@ -21,11 +21,11 @@ Channel: routes musical notes to a channel.
 Keyswitch: sends a MIDI note that selects a sound in your instrument.
 KS + Channel: combines both methods.
 
-Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show their relevant parameters and can include a linked Controller. The fourth type, Controller, saves an independent preset. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
+Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected name and settings into a new mapping, leaving the original intact. For keyswitch variants it first asks for a group name. Group name is shown when editing a velocity group and renames its submenu without changing variant names. Edit the copied name as needed; Save & Next still clears the name. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show their relevant parameters and can include a linked Controller. Controller saves an independent preset. Ending saves an independent keyswitch at the end of a note. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
 
 Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. An unmapped key switches to Add New with an empty name, so the previous mapping is kept. Both values remain editable. Save stores changes without closing the window. Save & Next stores the current mapping and always switches to Add New with an empty name and the current parameters. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
 
-Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; the highest-velocity name labels the group. Each variant keeps its own name and velocity.
+Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; Group name sets the submenu title independently; older groups use the highest-velocity name until renamed. Each variant keeps its own name and velocity.
 
 Select notes and choose a name to apply it. Clear articulation removes the explicit override; a configured default can apply again. Defaults require a keyswitch mapping.
 
@@ -43,7 +43,7 @@ Removing a bank or mapping does not erase existing MIDI assignments. Use Clear a
 
 ## 4. Manual keyswitches
 
-Draw or edit notes directly on mapped articulation rows. They are treated as manual switches and do not receive a default articulation. Their last switch remains active until another manual switch or an explicit automatic assignment on that MIDI channel.
+Draw or edit notes directly on mapped articulation rows. They are treated as manual switches and do not receive a default articulation. With no default, their last switch remains active until another switch. With a default configured, manual switches override notes in their drawn region; later unassigned notes return to the default.
 
 A later switch shortens the earlier keyswitch at its start. Different switches at exactly the same time on one channel remain ambiguous.
 
@@ -123,7 +123,7 @@ Mappings are listed by descending KS pitch: higher pitches appear first. A check
 | Settings > Legacy keyswitches > Find for review | Selects possible switches created before managed ownership markers; review them first. |
 | Settings > Legacy keyswitches > Remove reviewed | Deletes the reviewed selection only after the script's safety checks. |
 | Settings > Name keyswitch rows | Adds articulation names to mapped piano-roll rows. |
-| Settings > Default articulation | Selects the fallback keyswitch articulation or disables it with None. Channel-only mappings cannot be defaults. |
+| Default articulation | Selects the fallback keyswitch articulation or disables it with None. Channel-only mappings cannot be defaults. |
 | Settings > Keyswitch timing | Sets timing distance/compatibility length for current-bank mappings, keeping each mapping’s Before/After direction, refreshes their assignments in the active take, and saves defaults for new mappings. Overlap is retained for compatibility with older timing behavior. |
 | Settings > Chase MIDI note-ons | Toggles REAPER's note-chase option for starting playback inside sustained MIDI notes. |
 | Settings > Auto-stagger conflicting notes | Enables small start delays to resolve different automatic articulations at one onset/channel. Ends stay fixed. |
@@ -146,7 +146,7 @@ For MIDI input, the editor reads incoming note-on pitch and velocity. Piano-roll
 
 ## Example: a default and an exception
 
-Choose your sustained articulation under **Settings > Default articulation**. Select a few musical notes and apply Staccato. Notes without an explicit override use the default again at their starts, except where a manually drawn switch intentionally controls the channel. A default cannot provide a different simultaneous sound to another note on the same channel: use suitable instrument routing or auto-stagger where appropriate.
+Choose your sustained articulation under **Default articulation**. Select a few musical notes and apply Staccato. Notes without an explicit override use the default again at their starts, except where a manually drawn switch intentionally controls the channel. A default cannot provide a different simultaneous sound to another note on the same channel: use suitable instrument routing or auto-stagger where appropriate.
 
 Automatic following, default maintenance, overlap trimming and pitch protection require the main script to remain running. Save projects and export banks before transferring your setup to another computer.
 
@@ -154,7 +154,7 @@ Automatic following, default maintenance, overlap trimming and pitch protection 
 
 Choose Controller in Add / Edit articulation to save a named, independent preset. It appears under Controller in the full and quick menus. This submenu is also available to reset controllers linked to articulations or assigned to selected notes. Applying it preserves the selected notes' articulation. Other articulation types can include a linked Controller; choose None to leave it disabled.
 
-The chooser starts with Pitch Bend, Mod Wheel (CC 1) and Hold Pedal (CC 64), followed by the other CC numbers. CC values range from 0 to 127. Pitch Bend ranges from -8192 to 8191, with 0 at center. Hold Pedal normally uses 127 to hold and reset 0 to release.
+The chooser starts with None (unassigned), followed by Pitch Bend, Mod Wheel (CC 1), Hold Pedal (CC 64), and the other CC numbers. Visiting Controller does not automatically assign Pitch Bend. CC values range from 0 to 127. Pitch Bend ranges from -8192 to 8191, with 0 at center. Hold Pedal normally uses 127 to hold and reset 0 to release.
 
 Length: Full note sets the value before note-on and resets after note-off. Note start makes a short pulse across note-on. Note end sets the value while the note is still held and resets after note-off. Before and After set these margins in milliseconds, with at least one MIDI tick on either side. Reset value is the value sent at the end. Control channel 0 follows the musical note's channel.
 
@@ -163,3 +163,19 @@ Controllers follow musical note moves and length edits while the manager runs. A
 Controllers affect every sounding voice on their MIDI channel. Overlapping notes cannot have independent controller states on the same channel. A later assignment on the same controller lane replaces its earlier state. An independent preset overrides a linked controller on that lane until the articulation is applied again. Other controller lanes remain assigned.
 
 **Controller > Reset controllers** removes all controller assignments from selected notes while preserving their articulation. It is disabled when no selected notes have controllers. Settings > Clear controller assignments provides the same operation. Removing a preset from the bank preserves existing MIDI assignments. Controller presets are saved with this track's bank.
+
+When **Empty bank** is selected, **Add / Edit articulation** first opens **New bank**. Enter a name: the bank is saved and selected before the editor opens. Cancel creates no bank or articulation. The name field is widened in both creation and rename dialogs. A checkmark beside an articulation indicates its assignment to selected notes; it does not indicate whether the mapping was saved.
+
+**Default articulation** is in the full menu directly below **Banks**. It is disabled for **Empty bank**. **Add variant** asks for **Group name** before creating a keyswitch variant; cancelling leaves the original untouched. Group names are saved with the bank, including Export/Import. The field appears when editing a velocity group; single articulations keep their own direct menu entry.
+
+## Ending keyswitches
+
+Choose **Type → Ending** in Add / Edit articulation, configure KS note, velocity, KS channel and Delay, and save. The **Ending** submenu contains only records of this type. Ordinary articulation records are excluded. Switching a saved primary record to Ending prepares a separate new record and preserves the original. Select musical notes and apply **Articulations → Open** (or Slap), then **Ending → Slide Down**. The ending is independent: changing it preserves the starting articulation and channel. **Ending → Clear ending** removes only the ending; **Clear articulation** keeps it. Endings cannot serve as the default articulation.
+
+For **Note end**, **Delay (ms)** is the distance **before note-off**. The keyswitch starts while the voice is held and ends with the musical note; there is at least one MIDI tick before note-off. The timing stays inside the note. Very short notes may not have room and are rejected without changing MIDI. Endings follow note moves and length edits while the main script runs. Set KS velocity and KS channel as required by the instrument; musical velocity is preserved. Notes sharing a MIDI channel share its keyswitch state.
+
+Save the project for note assignments and the bank. Editing a preset does not change existing snapshots; select notes and reapply the ending.
+
+## Editing and responsiveness
+
+The Add / Edit window can remain open while notes are moved or resized: existing articulation, Ending and controller links keep following the notes. During the native Quantize Events preview, automatic MIDI writes pause; links are reconciled after closing the dialog. Selection-only changes such as Select all use a separate path and do not regenerate switches. Unchanged playback and scrolling reuse the cached state. Large-item updates use one MIDI buffer write while retaining the musical-note integrity check.

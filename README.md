@@ -26,7 +26,7 @@ The script requires [js_ReaScriptAPI](https://github.com/juliansader/ReaExtensio
 
 Open a MIDI item. In **Actions > MIDI Editor**, run `Articulation_Manager.lua`. Assign a shortcut to `Articulation_Quick_Menu.lua` in the same action section for quick articulation selection. Keep the main script running so it can update linked keyswitches.
 
-Create a bank through **Settings > Banks > New** and add entries through **Add / Edit articulation**. Enable **Settings > Run script on startup** for automatic startup. Save your project to restore track bank choices and note assignments.
+Create a bank through **Banks > New**, or choose **Add / Edit articulation** with Empty bank selected to create a bank first. Choose **Default articulation** below Banks for notes without another assignment. Enable **Settings > Run script on startup** for automatic startup. Save your project to restore track bank choices and note assignments.
 
 Personal banks, projects, and user backups are not included in this repository. When moving from a manual installation to ReaPack, reassign your shortcuts to the actions from the new installation.
 
@@ -34,13 +34,13 @@ For a full installation guide in Russian, see [INSTALL_RU](ArticulationBox/INSTA
 
 ## Articulation editor
 
-Add / Edit articulation uses one compact, resizable window with **Keyswitch**, **Channel**, **KS + Channel**, and **Controller** choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. **Save & Next** builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.
+Add / Edit articulation uses one compact, resizable window with **Keyswitch**, **Channel**, **KS + Channel**, **Controller**, and **Ending** choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. **Save & Next** builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.
 
 Choose **Before note start** or **After note start** and set Delay in milliseconds. A delayed keyswitch can trigger a loop ending after a chord starts, with independent keyswitch velocity. Automatic keyswitches still follow the musical note’s end.
 
 ## Manual keyswitches
 
-You can draw and edit MIDI notes directly on articulation rows. These notes do not receive a default articulation. Their latest switch remains active until the next explicit automatic assignment on the same MIDI channel.
+You can draw and edit MIDI notes directly on articulation rows. These notes do not receive a default articulation. With a default articulation selected, a manual switch applies within its drawn region and the default returns for later notes. Without a default, the latest switch remains active until another switch or explicit assignment on that MIDI channel.
 
 If you independently change an automatic keyswitch's pitch, position, length, or velocity, it becomes manual. Its previous automatic assignments are removed while the musical notes are preserved. Moving musical notes still moves their linked automatic keyswitches.
 
@@ -60,4 +60,12 @@ Adapted Gridbox code retains its original MIT copyright and license notice in [T
 
 ### Controllers
 
-Save Pitch Bend or any CC as an independent named preset, or attach it to an articulation. Ready menus show **Controller** when presets are available or assigned controllers can be reset. **Reset controllers** clears controllers from selected notes while preserving articulations. Choose **Full note**, **Note start**, or **Note end**, with Before/After margins and a reset value. Pitch Bend, Mod Wheel and Hold Pedal appear first in the chooser. Controllers follow note edits and Undo/Redo; see the [user guide](ArticulationBox/USER_GUIDE.md#controllers).
+Save Pitch Bend or any CC as an independent named preset, or attach it to an articulation. Ready menus show **Controller** when presets are available or assigned controllers can be reset. **Reset controllers** clears controllers from selected notes while preserving articulations. Choose **Full note**, **Note start**, or **Note end**, with Before/After margins and a reset value. **None** is selected initially; Pitch Bend, Mod Wheel and Hold Pedal follow it in the chooser. Controllers follow note edits and Undo/Redo; see the [user guide](ArticulationBox/USER_GUIDE.md#controllers).
+
+### Ending
+
+**Type → Ending** creates a separate end-of-note keyswitch. The Ending menu lists only these presets. Apply Open or Slap normally, then add a slide from Ending. Changing the primary articulation keeps the ending; Clear ending removes it independently. Delay is measured before note-off.
+
+### Editing and performance
+
+Keep Add / Edit open while moving or resizing notes: links remain active. During the native Quantize Events live preview, automatic MIDI writes pause and resume when the dialog closes. Selection changes such as Select all do not regenerate switches; unchanged playback and scrolling reuse the cached state. Large-item writes are batched while musical-note integrity checks remain enabled.

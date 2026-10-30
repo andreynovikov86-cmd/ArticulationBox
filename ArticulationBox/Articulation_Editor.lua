@@ -14,8 +14,8 @@ return function(R,options)
  local font=I.CreateFont('sans-serif',14)
  I.Attach(ctx,font)
  local entry={} for k,v in pairs(options.entry) do entry[k]=v end
- local mode=entry.mode=='controller' and 3 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
- local after=entry.lead<0 and 1 or 0
+ local mode=entry.mode=='controller' and 3 or entry.trigger=='end' and 4 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
+ local after=entry.trigger=='end' and 2 or entry.lead<0 and 1 or 0
  local distance=math.abs(entry.lead)
  local function savedSize(key,fallback,lo,hi)
   local value=R.GetExtState and tonumber(R.GetExtState('ArticulationManager_v4',key))
@@ -28,13 +28,14 @@ return function(R,options)
  local selected=options.selected or 0
  local drafts={}
  local variantMode=false
+ local nameRevision=0
  local windowDrag
  local channels={} for n=1,16 do channels[#channels+1]=tostring(n) end
  channels=table.concat(channels,'\0')..'\0'
  local ksChannels='0 — Note channel\0'..channels
  local controlNames={[0]='Bank Select',[1]='Mod Wheel',[2]='Breath',[4]='Foot Pedal',[5]='Portamento Time',[6]='Data Entry',[7]='Volume',[8]='Balance',[10]='Pan',[11]='Expression',[64]='Hold Pedal',[65]='Portamento',[66]='Sostenuto',[67]='Soft Pedal',[68]='Legato',[69]='Hold 2',[71]='Resonance',[72]='Release',[73]='Attack',[74]='Brightness',[91]='Reverb',[93]='Chorus'}
- local controlLabels={'Pitch Bend','Mod Wheel (CC 1)','Hold Pedal (CC 64)','None'}
- local controlValues={-1,1,64,-2}
+ local controlLabels={'None','Pitch Bend','Mod Wheel (CC 1)','Hold Pedal (CC 64)'}
+ local controlValues={-2,-1,1,64}
  for cc=0,127 do if cc~=1 and cc~=64 then
   controlLabels[#controlLabels+1]='CC '..cc..(controlNames[cc] and (' — '..controlNames[cc]) or '')
   controlValues[#controlValues+1]=cc
@@ -58,15 +59,18 @@ return function(R,options)
  local function integer(value,lo,hi) return type(value)=='number' and value%1==0 and value>=lo and value<=hi end
  local function snapshot()
   local result={} for k,v in pairs(entry) do result[k]=v end
-  result.mode=({'ch','ks','both','controller'})[mode+1]
+  result.mode=({'ch','ks','both','controller','ks'})[mode+1]
   result.lead=after==1 and -distance or distance
+  result.trigger=mode==4 and 'end' or nil
+  if result.trigger=='end' then result.mode='ks' end
   return result
  end
  local function setEntry(updated)
+  nameRevision=nameRevision+1
   entry={} for k,v in pairs(updated) do entry[k]=v end
   initControl(entry)
-  mode=entry.mode=='controller' and 3 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
-  after=entry.lead<0 and 1 or 0 distance=math.abs(entry.lead)
+  mode=entry.mode=='controller' and 3 or entry.trigger=='end' and 4 or entry.mode=='ch' and 0 or entry.mode=='both' and 2 or 1
+  after=entry.trigger=='end' and 2 or entry.lead<0 and 1 or 0 distance=math.abs(entry.lead)
   editing=selected~=0 first=true errorText=nil
  end
  local function updateState(state)
@@ -89,6 +93,7 @@ return function(R,options)
  end
  local function candidate()
   if not entry.name:find('%S') then return nil,'Enter an articulation name.' end
+  if entry.grouped and (mode==1 or mode==2 or mode==4) and (not entry.groupName or not entry.groupName:find('%S')) then return nil,'Enter a group name.' end
   if not integer(entry.channel,1,16) then return nil,'Note channel must be between 1 and 16.' end
   if not integer(entry.pitch,0,127) then return nil,'KS note must be between 0 and 127.' end
   if not integer(entry.velocity,1,127) then return nil,'KS velocity must be between 1 and 127.' end
@@ -147,12 +152,12 @@ return function(R,options)
    end
    lastRow=row
   end
-  if (mode==1 or mode==2) and learned then
+  if (mode==1 or mode==2 or mode==4) and learned then
    if not variantMode and options.onSelect then
     local fallback,current,exact
     for _,item in ipairs(options.entries or {}) do
      local a=item.entry
-     if a and a.mode~='ch' and a.pitch==learned then
+     if item.index>0 and a and (a.mode=='ks' or a.mode=='both') and (a.trigger=='end')==(mode==4) and a.pitch==learned then
       fallback=fallback or item
       if item.index==selected then current=item end
       if a.velocity==learnedVelocity and (not exact or item.index==selected) then exact=item end
@@ -161,10 +166,10 @@ return function(R,options)
     local match=exact or current or fallback
     if match and match.index~=selected then
      selectEntry(match.index)
-    elseif not match and selected>0 then
+    elseif not match and (selected>0 or entry.pitch~=learned) then
      -- A different, unmapped key starts a new mapping. Do not silently
      -- repurpose the last saved articulation just because learning is active.
-     local nextEntry=snapshot() nextEntry.name=''
+     local nextEntry=snapshot() nextEntry.name='' nextEntry.grouped=false nextEntry.groupName=nil
      if selectEntry(0) then
       setEntry(nextEntry) drafts[0]=nil
      else return end
@@ -184,7 +189,7 @@ return function(R,options)
   savedMessage='Saved: '..entry.name errorText=nil
   if nextEntry then
    selected=0 drafts[0]=nil
-   entry.name='' editing=false first=true variantMode=false
+   entry.name='' entry.grouped=false entry.groupName=nil nameRevision=nameRevision+1 editing=false first=true variantMode=false
   else editing=selected~=0 end
   return false
  end
@@ -198,8 +203,8 @@ return function(R,options)
   I.SetNextWindowSize(ctx,windowWidth,windowHeight,I.Cond_Appearing)
   local minimum=mode==2 and 460 or 430
   if options.allowControllers then
-   local rows=(mode==3 and 0 or mode==0 and 1 or mode==2 and 6 or 5)+1+(entry.ctrl~='none' and 6 or 0)
-   minimum=math.max(430,300+rows*25+(selected~=0 and 35 or 0))
+   local rows=(mode==3 and 0 or mode==0 and 1 or mode==2 and 6 or 5)+1+(entry.ctrl~='none' and 6 or 0)+(entry.grouped and (mode==1 or mode==2 or mode==4) and 1 or 0)
+   minimum=math.max(465,335+rows*25+(selected~=0 and 35 or 0))
   end
   I.SetNextWindowSizeConstraints(ctx,380,minimum,800,900)
   if windowDrag then
@@ -245,7 +250,7 @@ return function(R,options)
    I.DrawList_AddCircleFilled(drawList,cx,cy,7,0xFF5F57FF,32)
    I.DrawList_AddQuadFilled(drawList,cx-3,cy-1.8,cx-1.8,cy-3,cx+3,cy+1.8,cx+1.8,cy+3,0x72120EFF)
    I.DrawList_AddQuadFilled(drawList,cx-3,cy+1.8,cx-1.8,cy+3,cx+3,cy-1.8,cx+1.8,cy-3,0x72120EFF)
-   I.DrawList_AddText(drawList,x+23,y+1,0xEEEEEEFF,mode==3 and 'Add / Edit controller' or 'Add / Edit articulation')
+   I.DrawList_AddText(drawList,x+23,y+1,0xEEEEEEFF,mode==3 and 'Add / Edit controller' or mode==4 and 'Add / Edit ending' or 'Add / Edit articulation')
    I.Separator(ctx) I.Spacing(ctx)
    I.PushTextWrapPos(ctx,0)
    I.TextDisabled(ctx,'Bank: '..(options.bankName or ''))
@@ -267,49 +272,55 @@ return function(R,options)
    end
    row('Name',function()
     if focusName then I.SetKeyboardFocusHere(ctx) end
-    changed,entry.name=I.InputText(ctx,'##name',entry.name)
+    changed,entry.name=I.InputText(ctx,'##name'..nameRevision,entry.name)
    end)
+   if entry.grouped and (mode==1 or mode==2 or mode==4) then
+    row('Group name',function() changed,entry.groupName=I.InputText(ctx,'##groupName'..nameRevision,entry.groupName or '') end)
+   end
    I.Spacing(ctx)
    I.Text(ctx,options.allowControllers and 'Type (choose one)' or 'Articulation type (choose one)')
-   local typeLabels=options.allowControllers and {'Keyswitch','Channel','KS + Channel','Controller'} or {'Keyswitch','Channel','KS + Channel'}
+   local typeLabels=options.allowControllers and {'Keyswitch','Channel','KS + Channel','Controller','Ending'} or {'Keyswitch','Channel','KS + Channel'}
    local columns=options.allowControllers and 2 or 3
    local buttonWidth=(I.GetContentRegionAvail(ctx)-(columns-1)*8)/columns
    for i,label in ipairs(typeLabels) do
-    local value=({1,0,2,3})[i]
+    local value=({1,0,2,3,4})[i]
     if (i-1)%columns~=0 then I.SameLine(ctx) end
     local isSelected=mode==value
     if isSelected then I.PushStyleColor(ctx,I.Col_Button,0x7750BAFF) end
-    if I.Button(ctx,label,buttonWidth,29) then
-     if (value==3)~=(mode==3) then
-      local copy=snapshot() copy.name='' copy.mode=({'ch','ks','both','controller'})[value+1]
+    if I.Button(ctx,label,i==5 and I.GetContentRegionAvail(ctx) or buttonWidth,29) then
+     local oldClass=mode==3 and 'controller' or mode==4 and 'ending' or 'primary'
+     local newClass=value==3 and 'controller' or value==4 and 'ending' or 'primary'
+     if oldClass~=newClass then
+      local copy=snapshot() copy.name='' copy.mode=({'ch','ks','both','controller','ks'})[value+1]
+      copy.trigger=value==4 and 'end' or nil copy.grouped=false copy.groupName=nil
       if not options.onSelect or selectEntry(0,true) then
        selected=0 drafts[0]=nil setEntry(copy)
       end
      end
-     mode=value
-     if mode==3 and entry.ctrl=='none' then entry.ctrl='pitch' entry.ctrlValue=0 entry.ctrlReset=0 end
+     mode=value after=mode==4 and 2 or (after==2 and 0 or after)
     end
     if isSelected then I.PopStyleColor(ctx) end
    end
    I.Spacing(ctx)
-    if mode==0 or mode==2 then
+    if mode==0 or (mode==2 and after~=2) then
      row('Channel',function()
       local n
       changed,n=I.Combo(ctx,'##noteChannel',entry.channel-1,channels)
       entry.channel=n+1
      end)
     end
-    if mode==1 or mode==2 then
+    if mode==1 or mode==2 or mode==4 then
     row('KS note (auto)',function() changed,entry.pitch=I.InputInt(ctx,'##pitch',entry.pitch,1,12) end)
     row('KS velocity (1–127)',function() changed,entry.velocity=I.InputInt(ctx,'##velocity',entry.velocity,1,10) end)
     row('KS channel',function() changed,entry.kschannel=I.Combo(ctx,'##ksChannel',entry.kschannel,ksChannels) end)
-    row('Trigger',function() changed,after=I.Combo(ctx,'##trigger',after,'Before note start\0After note start\0') end)
+    if mode==4 then row('Trigger',function() I.TextDisabled(ctx,'Note end') end)
+    else row('Trigger',function() changed,after=I.Combo(ctx,'##trigger',after,'Before note start\0After note start\0') end) end
     row('Delay (ms)',function() changed,distance=I.InputDouble(ctx,'##distance',distance,0.1,1,'%.2f') end)
     end
    if options.allowControllers then
     I.Spacing(ctx)
     row('Controller',function()
-     local choice=3
+     local choice=0
      for i,v in ipairs(controlValues) do if (entry.ctrl=='pitch' and v==-1) or (entry.ctrl=='cc' and v==entry.ctrlCC) then choice=i-1 break end end
      local nextChoice
      changed,nextChoice=I.Combo(ctx,'##controller',choice,table.concat(controlLabels,'\0')..'\0')
@@ -342,7 +353,7 @@ return function(R,options)
     I.TextDisabled(ctx,savedMessage or 'Musical velocity stays unchanged.')
    else
     I.TextDisabled(ctx,savedMessage or 'Play a MIDI key or click a piano-roll key.')
-    I.TextDisabled(ctx,'Note and velocity are detected. You can edit them.')
+    I.TextDisabled(ctx,after==2 and 'Ending is added separately; the starting articulation stays.' or 'Note and velocity are detected. You can edit them.')
    end
    if errorText then
     I.Spacing(ctx) I.PushStyleColor(ctx,I.Col_Text,0xFF9B8CFF)
@@ -352,8 +363,15 @@ return function(R,options)
     I.Spacing(ctx)
     if I.Button(ctx,'Add variant',130,0) then
      local copy=snapshot() local sourceName=entry.name
-     if selectEntry(0,true) then
-      copy.name='' setEntry(copy) selected=0 editing=false variantMode=true first=true
+     local proceed=true
+     if mode==1 or mode==2 or mode==4 then
+      local accepted,name=R.GetUserInputs('Articulation group',1,'Group name,extrawidth=240',entry.groupName or sourceName)
+      if not accepted then proceed=false
+      elseif not name:find('%S') then errorText='Enter a group name.' proceed=false
+      else copy.groupName=name copy.grouped=true end
+     end
+     if proceed and selectEntry(0,true) then
+      setEntry(copy) selected=0 editing=false variantMode=true first=true
       savedMessage='New variant of '..sourceName
      end
     end

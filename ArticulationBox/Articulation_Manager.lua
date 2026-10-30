@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.9
+-- @version 1.0.10
 -- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
@@ -18,9 +18,23 @@
 --   Personal banks are stored outside this package and are not distributed.
 --   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Skip repeated note decoding when MIDI and project state are unchanged.
---   Avoid project-wide transpose scans and Undo journal work during idle playback.
---   Preserve selection, drag-release and bank/settings refresh behavior.
+--   Keep note links active while Add / Edit articulation is open.
+--   Pause automatic writes during native Quantize Events preview.
+--   Use one MIDI buffer write and indexed matching for long items.
+--   Handle selection changes without regenerating keyswitches.
+--   Skip MIDI scans on unrelated project changes during playback.
+--   Display literal ampersands in articulation menus.
+--   Add explicit Ending type; only ending records appear in its submenu.
+--   Add independent Ending keyswitches with Note end timing and Clear ending.
+--   Create and select a named bank before editing articulations from Empty bank.
+--   Widen bank name fields for creation and renaming.
+--   Clear the Name input buffer after Save & Next and when learning an unmapped key.
+--   Exclude standalone Controller presets from keyswitch name learning.
+--   Keep the source name when creating an articulation variant.
+--   Add independent group names to keyswitch velocity submenus.
+--   Move Default articulation below Banks; disable it for Empty bank.
+--   Restore defaults after manual keyswitch regions and show named velocity groups.
+--   Start Controller with None; do not add Pitch Bend when changing types.
 
 -- ArticulationBox by Andrey Novikov.
 -- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
@@ -57,6 +71,11 @@ local function number(v,min,max,integer)
  return n
 end
 local controllers={prefix='ABCTRL1',eventPrefix='ABCC1:'}
+function controllers.editorTake()
+ local context=controllers.editorContext
+ if not context or (context.project and R.EnumProjects(-1,'')~=context.project) then return nil end
+ return isMidiTake(context.take,context.project) and context.take or nil
+end
 function controllers.enabled(a) return a and (a.ctrl=='cc' or a.ctrl=='pitch') end
 function controllers.valid(a)
  if not a.ctrl or a.ctrl=='none' then return true end
@@ -128,12 +147,28 @@ end
 local function defaults(name,mode,ch)
  return {name=name,mode=mode,channel=ch,pitch=24,velocity=100,lead=1,length=1,kschannel=0}
 end
+local articulationGroups={}
+function articulationGroups.key(a)
+ if not a or (a.mode~='ks' and a.mode~='both') then return nil end
+ return table.concat({a.mode,a.mode=='both' and a.channel or 0,a.kschannel,a.pitch},':')..(a.trigger=='end' and ':end' or '')
+end
+function articulationGroups.multiple(b,a)
+ local id=articulationGroups.key(a) if not id then return false end
+ local velocity
+ for _,other in ipairs(b.arts) do if articulationGroups.key(other)==id then
+  if velocity and velocity~=other.velocity then return true end
+  velocity=other.velocity
+ end end
+ return false
+end
 local function parse(data)
  if data:sub(1,5)=='ABP1:' then data=unhex(data:sub(6)) if not data then return nil end end
  local result,b={},nil
  for line in data:gmatch('[^\r\n]+') do
   local f=split(line,'\t')
   if f[1]=='B' and f[2] and f[2]~='' then b={name=dec(f[2]),arts={},controllers={},default=tonumber(f[3]),ksLengthMode=f[4]=='follow' and 'follow' or 'short',overlap=tonumber(f[5])} result[#result+1]=b
+  elseif b and f[1]=='G' and #f==3 and f[2]~='' and f[3]~='' then
+   b.groupNames=b.groupNames or {};b.groupNames[dec(f[2])]=dec(f[3])
   elseif b and f[1]=='T' and #f==2 then
    local c=controllers.decode(f[2]) if not c or c.name=='' then return nil end
    b.controllers[#b.controllers+1]=c
@@ -141,13 +176,17 @@ local function parse(data)
    local a
    if f[1]=='C' then a=defaults(dec(f[2] or ''),'ch',tonumber(f[3]))
    else a={name=dec(f[2] or ''),mode=f[3],channel=tonumber(f[4]),pitch=tonumber(f[5]),velocity=tonumber(f[6]),lead=tonumber(f[7]),length=tonumber(f[8]),kschannel=tonumber(f[9]) or (f[1]=='A' and tonumber(f[4]) or nil)} end
-   if #f>9 and (#f~=10 or f[10]:sub(1,5)~='ctrl:' or not controllers.attach(a,f[10]:sub(6))) then return nil end
+   for i=10,#f do
+    if f[i]=='ending' then a.trigger='end'
+    elseif f[i]:sub(1,5)=='ctrl:' then if not controllers.attach(a,f[i]:sub(6)) then return nil end
+    else return nil end
+   end
    if not valid(a) then return nil end b.arts[#b.arts+1]=a
   else return nil end
  end
  for _,bank in ipairs(result) do
   if bank.overlap and not number(bank.overlap,0,10000,false) then return nil end
-  if bank.default and (not number(bank.default,1,#bank.arts,true) or bank.arts[bank.default].mode=='ch') then return nil end
+  if bank.default and (not number(bank.default,1,#bank.arts,true) or bank.arts[bank.default].mode=='ch' or bank.arts[bank.default].trigger=='end') then return nil end
  end
  return #result>0 and result or nil
 end
@@ -158,9 +197,12 @@ local function serialize(collection)
   for _,a in ipairs(b.arts) do
    local line=table.concat({'D',enc(a.name),a.mode,a.channel,a.pitch,a.velocity,a.lead,a.length,a.kschannel},'\t')
    if controllers.enabled(a) then line=line..'\tctrl:'..controllers.encode(a) end
+   if a.trigger=='end' then line=line..'\tending' end
    lines[#lines+1]=line
   end
   for _,c in ipairs(b.controllers or {}) do lines[#lines+1]='T\t'..controllers.encode(c) end
+  local ids={} for id in pairs(b.groupNames or {}) do ids[#ids+1]=id end table.sort(ids)
+  for _,id in ipairs(ids) do lines[#lines+1]='G\t'..enc(id)..'\t'..enc(b.groupNames[id]) end
  end
  return table.concat(lines,'\n')
 end
@@ -217,6 +259,7 @@ local function loadTrackBanks()
   return
  end
  local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
+ take=take or controllers.editorTake()
  local track=take and isMidiTake(take) and R.GetMediaItem_Track(R.GetMediaItemTake_Item(take)) or nil
  local data,index='',''
  if track then
@@ -326,6 +369,7 @@ local function switchFits(take,a,start,switchStart)
 end
 local function activeTake()
  local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
+ take=take or controllers.editorTake()
  if not take or not isMidiTake(take) then status='Open the MIDI editor.' return end
  return take,editor
 end
@@ -343,6 +387,10 @@ function controllers.forNote(n)
  local list,lanes={},{}
  local a=n.effective or n.a
  if controllers.enabled(a) then list[1]=a lanes[controllers.lane(a,n)]=1 end
+ if controllers.enabled(n.ending) then
+  local lane=controllers.lane(n.ending,n);local index=lanes[lane]
+  if index then list[index]=n.ending else list[#list+1]=n.ending lanes[lane]=#list end
+ end
  for _,c in ipairs(n.controllers or {}) do
   local lane=controllers.lane(c,n) local index=lanes[lane]
   if index then list[index]=c else list[#list+1]=c lanes[lane]=#list end
@@ -468,9 +516,10 @@ local function read(take)
     t.key=key(pos,t.ch,t.p) scene.texts[#scene.texts+1]=t
     local marker,extras=extractMarker(tail)
     local controlMarker controlMarker,extras=extractUserMarker(extras,controllers.prefix)
+    local endingMarker endingMarker,extras=extractUserMarker(extras,'ABEND1')
     t.ownedKS=userValue(tail)==KS..':1'
     t.manualKS=userValue(tail)==KS..':manual'
-    t.managed=marker~=nil or controlMarker~=nil or t.ownedKS
+    t.managed=marker~=nil or controlMarker~=nil or endingMarker~=nil or t.ownedKS
     local matches=scene.bykey[t.key] or {}
     if t.managed and #matches>1 then error('Overlapping duplicate notes on one channel: separate them before assigning an articulation.') end
     if #matches==1 then
@@ -483,6 +532,9 @@ local function read(take)
        if n.a then error('This note has two assignment markers. Undo the last change.') end
        n.a=assignment(marker) if not n.a then error('Invalid articulation marker.') end
       end
+      if endingMarker then
+       n.ending=assignment(endingMarker) if not n.ending then error('Invalid ending marker.') end
+      end
       if controlMarker then
        if n.controllers then error('This note has two controller assignment markers.') end
        n.controllers,n.controllerShift=controllers.unpack(controlMarker)
@@ -494,37 +546,65 @@ local function read(take)
   end
  end
  local rows=keyswitchRows()
+ scene.switches={}
+ for _,n in ipairs(scene.notes) do if n.generated then
+  local id=n.ch..':'..n.p..':'..n.v
+  scene.switches[id]=scene.switches[id] or {} table.insert(scene.switches[id],n)
+ end end
+ for _,list in pairs(scene.switches) do table.sort(list,function(a,b) return a.s<b.s end) end
  for _,n in ipairs(scene.notes) do n.keyswitchRow=not n.generated and (n.manualKS or rows[n.ch..':'..n.p]) or false end
  -- Untagged notes on mapped rows are manual switches. Their last note-on wins
  -- until an explicit automatic assignment is encountered on that channel.
  local controls,explicit={},{}
+ local currentBank=bank()
+ local hasDefault=currentBank.default and currentBank.arts[currentBank.default] and currentBank.arts[currentBank.default].mode~='ch'
  for _,n in ipairs(scene.notes) do
   if n.keyswitchRow and not n.mute then
-   local a,fallback,velocities=nil,nil,{}
-   for _,mapped in ipairs(bank().arts) do
+   local a,fallback,velocities,names=nil,nil,{},{nameList={},seen={}}
+   for _,mapped in ipairs(currentBank.arts) do
     local ch=mapped.kschannel==0 and (mapped.mode=='both' and mapped.channel-1 or n.ch) or mapped.kschannel-1
     if mapped.mode~='ch' and mapped.pitch==n.p and ch==n.ch then
      fallback=fallback or mapped velocities[mapped.velocity]=true
-     if mapped.velocity==n.v then a={bank=bank().name} for k,v in pairs(mapped) do a[k]=v end break end
+     if not names.seen[mapped.name] then names.seen[mapped.name]=true names.nameList[#names.nameList+1]=mapped.name end
+     if mapped.velocity==n.v then a={bank=currentBank.name} for k,v in pairs(mapped) do a[k]=v end break end
     end
    end
    if not a and fallback then
     local variants=0 for _ in pairs(velocities) do variants=variants+1 end
-    if variants==1 then a={bank=bank().name} for k,v in pairs(fallback) do a[k]=v end end
+    a={bank=currentBank.name} for k,v in pairs(fallback) do a[k]=v end
+    if variants>1 then
+     a.name=((currentBank.groupNames or {})[articulationGroups.key(fallback)] or table.concat(names.nameList,' / '))..' [Vel '..n.v..']'
+    end
    end
    if a then a.velocity=n.v end
-   a=a or {bank=bank().name,name='KS '..n.p,mode='ks',channel=n.ch+1,pitch=n.p,velocity=n.v,lead=1,length=1,kschannel=n.ch+1}
-   controls[n.ch]=controls[n.ch] or {} controls[n.ch][#controls[n.ch]+1]={s=n.s,a=a}
+   a=a or {bank=currentBank.name,name='KS '..n.p,mode='ks',channel=n.ch+1,pitch=n.p,velocity=n.v,lead=1,length=1,kschannel=n.ch+1}
+   controls[n.ch]=controls[n.ch] or {} controls[n.ch][#controls[n.ch]+1]={s=n.s,e=n.e,a=a}
   elseif not n.generated and n.a and not n.a.implicit and n.a.mode~='ch' and not n.mute then
    local ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1
    explicit[ch]=explicit[ch] or {} explicit[ch][#explicit[ch]+1]=n.a.lead<0 and afterSwitchStart(take,n.s,n.a.lead) or n.s
   end
  end
+ for _,list in pairs(controls) do table.sort(list,function(a,b) return a.s<b.s end) end
+ for _,list in pairs(explicit) do table.sort(list) end
+ local function lastBefore(list,pos,strict,events)
+  local lo,hi=1,#list local found
+  while lo<=hi do local mid=(lo+hi)//2 local value=events and list[mid].s or list[mid]
+   if value<pos or (not strict and value==pos) then found=list[mid] lo=mid+1 else hi=mid-1 end
+  end
+  return found
+ end
  for _,n in ipairs(scene.notes) do if not n.generated and not n.keyswitchRow then
   local ch=n.a and n.a.mode~='ch' and n.a.kschannel~=0 and n.a.kschannel-1 or n.ch
-  local latest,reset
-  for _,ev in ipairs(controls[ch] or {}) do if ev.s<=n.s and (not latest or ev.s>latest.s) then latest=ev end end
-  for _,pos in ipairs(explicit[ch] or {}) do if pos<n.s and (not reset or pos>reset) then reset=pos end end
+  local latest=lastBefore(controls[ch] or {},n.s,false,true)
+  local reset=lastBefore(explicit[ch] or {},n.s,true,false)
+  -- With a default, a manual switch covers its drawn region, rather than
+  -- suppressing defaults for every later note on that MIDI channel.
+  if latest and hasDefault and n.s>=latest.e then latest=nil end
+  if hasDefault then
+   for _,ev in ipairs(controls[ch] or {}) do
+    if ev.a.lead<0 and ev.s>n.s and ev.s<n.e and switchFits(take,ev.a,n.s,ev.s) and (not latest or ev.s>latest.s) then latest=ev end
+   end
+  end
   if latest and (not reset or latest.s>reset) then
    n.manualSignal=latest.a
    if not n.a or n.a.implicit then n.manualArt=latest.a end
@@ -604,7 +684,7 @@ end
 
 local function defaultArt()
  local b=bank() local a=b.default and b.arts[b.default]
- return a and a.mode~='ch' and a or nil
+ return a and a.mode~='ch' and a.trigger~='end' and a or nil
 end
 -- Every unassigned musical note uses the default, including members of a
 -- partially assigned chord. Keep this virtual so changing the bank's default
@@ -652,7 +732,13 @@ end
 local function staggerConflicts(take,scene,includeExisting)
  if R.GetExtState(SECTION,'autoStagger')~='1' then return 0 end
  local delay=number(R.GetExtState(SECTION,'staggerMs'),0.1,50,false) or 2
- local groups,order={},{}
+ local groups,order,choices={},{},{}
+ for _,n in ipairs(scene.notes) do if not n.generated and not n.mute and n.effective and n.effective.lead>=0 then
+  local id=key(n.s,n.ch,0) local choice=config(n.effective)
+  local existing=choices[id]
+  if not existing then choices[id]={first=choice}
+  elseif existing.first~=choice then existing.mixed=true end
+ end end
  for _,n in ipairs(scene.notes) do
   if not n.generated and not n.mute and ((n.sel and n.changed) or includeExisting) and n.a and n.a.mode~='ch' and n.a.lead>=0 then
    local id=key(n.s,n.ch,0)..':'..config(n.a)
@@ -669,10 +755,8 @@ local function staggerConflicts(take,scene,includeExisting)
  end)
  local moved=0
  for _,g in ipairs(order) do
-  local conflict=false
-  for _,n in ipairs(scene.notes) do
-   if not g.members[n] and not n.generated and not n.mute and n.effective and n.effective.lead>=0 and n.ch==g.ch and key(n.s,n.ch,0)==key(g.s,g.ch,0) and config(n.effective)~=g.choice then conflict=true break end
-  end
+  local at=choices[key(g.s,g.ch,0)]
+  local conflict=at and (at.mixed or at.first~=g.choice)
   if conflict then
    local time=R.MIDI_GetProjTimeFromPPQPos(take,g.s)
    local candidate=math.max(math.floor(g.s)+2,round(R.MIDI_GetPPQPosFromProjTime(take,time+delay/1000)))
@@ -710,7 +794,17 @@ end
 local function ensureBoundaryRoom(take,scene)
  local item=R.GetMediaItemTake_Item(take)
  local left=math.ceil(R.MIDI_GetPPQPosFromProjTime(take,R.GetMediaItemInfo_Value(item,'D_POSITION')))
- local groups,order={},{}
+ local groups,order,starts,near,unassignedLeft={},{},{},{},{}
+ for _,n in ipairs(scene.notes) do if not n.generated and not n.mute then
+  if not n.a and math.floor(n.s)==left then unassignedLeft[n.ch]=true end
+  if not n.keyswitchRow then starts[n.ch]=starts[n.ch] or {} table.insert(starts[n.ch],n.s) end
+ end end
+ for ch,list in pairs(starts) do
+  table.sort(list) near[ch]={} local previous
+  for _,pos in ipairs(list) do
+   if previous~=pos then near[ch][pos]=previous and math.floor(pos)-math.floor(previous)<2 or false previous=pos end
+  end
+ end
  for _,n in ipairs(scene.notes) do
   local keyswitch=n.a and n.a.mode~='ch' and n.a.lead>=0
   local controller=controllers.needsLead(n)
@@ -718,14 +812,16 @@ local function ensureBoundaryRoom(take,scene)
   local channel=keyswitch and (n.a.kschannel==0 and n.ch or n.a.kschannel-1) or n.ch
   local needsRoom=math.floor(n.s)<=left
   if not needsRoom and signal and math.floor(n.s)==left+1 then
-   for _,other in ipairs(scene.notes) do
-    if other~=n and not other.generated and not other.mute and not other.a and other.ch==channel and other.s<n.s and math.floor(other.s)==left then needsRoom=true break end
-   end
+   needsRoom=unassignedLeft[channel] or false
   end
   local closeStart=false
   if R.GetExtState(SECTION,'autoStagger')=='1' and signal then
-   for _,other in ipairs(scene.notes) do
-    if other~=n and not other.generated and not other.keyswitchRow and not other.mute and other.ch==channel and other.s<n.s and math.floor(n.s)-math.floor(other.s)<2 then closeStart=true break end
+   closeStart=near[channel] and near[channel][n.s] or false
+   -- An explicit KS channel can differ from the musical channel.
+   if channel~=n.ch then
+    local list=starts[channel] or {} local lo,hi=1,#list local previous
+    while lo<=hi do local mid=(lo+hi)//2 if list[mid]<n.s then previous=list[mid] lo=mid+1 else hi=mid-1 end end
+    closeStart=previous and math.floor(n.s)-math.floor(previous)<2 or false
    end
   end
   if not n.generated and not n.keyswitchRow and not n.mute and signal and (needsRoom or closeStart) then
@@ -780,6 +876,12 @@ local function ensureBoundaryRoom(take,scene)
   end
  end
  return moved
+end
+function articulationGroups.endingPosition(take,n)
+ local a=n.ending local finish=math.floor(n.e)
+ local start=math.max(math.floor(n.s)+1,math.min(finish-1,round(R.MIDI_GetPPQPosFromProjTime(take,R.MIDI_GetProjTimeFromPPQPos(take,n.e)-math.abs(a.lead)/1000))))
+ if start>=finish then error('This note is too short for a keyswitch ending.') end
+ return start,finish,a.kschannel==0 and n.ch or a.kschannel-1
 end
 local function plan(take,scene)
  prepareDefaults(take,scene)
@@ -850,6 +952,13 @@ local function plan(take,scene)
    end
   end
  end end
+ for _,n in ipairs(scene.notes) do if n.ending and not n.generated and not n.keyswitchRow and not n.mute then
+  local a=n.ending
+  local start,finish,ch=articulationGroups.endingPosition(take,n)
+  local id=key(start,ch,0) local signal=a.pitch..':'..a.velocity
+  if events[id] and events[id].signal~=signal then error('Conflicting keyswitch endings on one channel.') end
+  events[id]={s=start,e=finish,ch=ch,p=a.pitch,v=a.velocity,signal=signal}
+ end end
  -- Never overwrite a real musical note, even if it happens to be on a keyswitch pitch.
  local occupancy={}
  for _,n in ipairs(scene.notes) do if not n.generated then
@@ -867,17 +976,16 @@ local function plan(take,scene)
  end end
  table.sort(timeline,function(a,b) if a.ch~=b.ch then return a.ch<b.ch end return a.s<b.s end)
  scene.manualEnds={}
- for i,entry in ipairs(timeline) do
-  local nextStart
-  for j=i+1,#timeline do
-   local later=timeline[j]
-   if later.ch~=entry.ch then break end
-   if later.s>entry.s then nextStart=later.s break end
-  end
+ local nextStart,previousStart,previousChannel
+ for i=#timeline,1,-1 do
+  local entry=timeline[i]
+  if entry.ch~=previousChannel then nextStart=nil previousStart=nil
+  elseif entry.s~=previousStart then nextStart=previousStart end
   if nextStart and entry.e>nextStart then
    if entry.event then entry.event.e=nextStart
    else scene.manualEnds[entry.note.idx]=nextStart end
   end
+  previousStart=entry.s previousChannel=entry.ch
  end
  for _,ev in ipairs(ordered) do
   for _,n in ipairs(occupancy[tostring(ev.ch)..':'..ev.p] or {}) do
@@ -888,7 +996,99 @@ local function plan(take,scene)
  scene.plannedControls=controllers.plan(take,scene)
  return ordered
 end
-local function write(take,scene,events)
+function controllers.writeRaw(take,scene,events,raw)
+ if not raw then return false end
+ local input={} local offset,pos=1,0
+ local valid=pcall(function()
+  while offset<=#raw do
+   local delta,flags,msg;delta,flags,msg,offset=string.unpack('<i4Bs4',raw,offset)
+   pos=pos+delta input[#input+1]={s=pos,flags=flags,msg=msg,order=#input+1,rank=1}
+  end
+ end)
+ if not valid then return false end -- Compatibility with old hosts/test adapters.
+ local starts,ends,removeTexts,removeCC={},{},{},{}
+ local function add(map,id,n) map[id]=map[id] or {} map[id][#map[id]+1]=n end
+ local function textKey(s,msg) return string.format('%.6f',s)..'\0'..msg end
+ for _,n in ipairs(scene.notes) do
+  local ch=n.oldch or n.ch
+  add(starts,key(n.olds or n.s,ch,n.p),n)
+  add(ends,key(n.olde or n.e,ch,n.p),n)
+ end
+ for _,t in ipairs(scene.texts) do
+  local n=(scene.bykey[t.key] or {})[1]
+  if t.managed or (n and not n.generated and (n.a or n.changed)) then
+   add(removeTexts,textKey(t.pos,t.msg),true)
+  end
+ end
+ for _,idx in ipairs(scene.controlTexts or {}) do
+  local yes,_,_,s,_,msg=R.MIDI_GetTextSysexEvt(take,idx)
+  if yes then add(removeTexts,textKey(s,msg),true) end
+ end
+ for _,c in ipairs(scene.ccs or {}) do if c.owned then add(removeCC,c.key,true) end end
+ local function consume(map,id)
+  local list=map[id] if not list or #list==0 then return nil end
+  return table.remove(list)
+ end
+ local output={} local terminal,removedCurveOwner
+ for i,ev in ipairs(input) do
+  local msg=ev.msg local keep=true
+  local status=#msg>0 and msg:byte(1)&0xF0
+  if #msg==3 and (status==0x90 or status==0x80) then
+   local on=status==0x90 and msg:byte(3)>0
+   local n=consume(on and starts or ends,key(ev.s,msg:byte(1)&15,msg:byte(2)))
+   -- Imported MIDI may contain unmatched note-ons/offs which the native note
+   -- API does not enumerate. Preserve those foreign bytes unchanged.
+   keep=not n or not n.generated
+   if n and keep then
+    ev.s=round(on and n.s or n.e)
+    ev.msg=string.char(status|n.ch,n.p,msg:byte(3))
+   end
+  elseif #msg==3 and (status==0xB0 or status==0xE0) then
+   keep=not consume(removeCC,controllers.eventKey(ev.s,status,msg:byte(1)&15,msg:byte(2),msg:byte(3)))
+  elseif msg:sub(1,2)==string.char(0xFF,15) then
+   keep=not consume(removeTexts,textKey(ev.s,msg:sub(3)))
+   if removedCurveOwner and msg:sub(3,7)=='CCBZ ' then keep=false end
+  end
+  removedCurveOwner=(status==0xB0 or status==0xE0) and not keep
+  if keep then
+   output[#output+1]=ev
+   if i==#input and (#msg==0 or (#msg==3 and status==0xB0 and msg:byte(2)==123 and msg:byte(3)==0)) then terminal=ev end
+  end
+ end
+ for _,map in ipairs({starts,ends}) do for _,list in pairs(map) do assert(#list==0,'A native MIDI note has no matching raw event.') end end
+ local function append(s,msg,rank,flags)
+  output[#output+1]={s=round(s),flags=flags or 0,msg=msg,rank=rank or 2,order=#input+#output+1}
+ end
+ for _,ev in ipairs(events) do
+  append(ev.s,string.char(0x90|ev.ch,ev.p,ev.v),2)
+  append(ev.e,string.char(0x80|ev.ch,ev.p,0),0)
+  append(ev.s,string.char(0xFF,15)..'NOTE '..ev.ch..' '..ev.p..' user '..KS..':1',3)
+ end
+ for _,n in ipairs(scene.notes) do if not n.generated and (n.a or n.ending or n.changed or (n.controllers and #n.controllers>0)) then
+  local tail=n.extras
+  if n.a then tail=appendMarker(tail,payload(n.a)) end
+  if n.ending then tail=appendUserMarker(tail,'ABEND1',payload(n.ending)) end
+  local control=controllers.pack(n.controllers,n.controllerShift)
+  if control~='' then tail=appendUserMarker(tail,controllers.prefix,control) end
+  if tail:find('%S') then append(n.s,string.char(0xFF,15)..'NOTE '..n.ch..' '..n.p..tail,3,n.mute and 2 or 0) end
+ end end
+ for _,c in ipairs(scene.plannedControls or {}) do
+  append(c.s,string.char(c.status|c.ch,c.d1,c.d2),2)
+  append(c.s,string.char(0xFF,15)..controllers.eventPrefix..table.concat({c.status,c.ch,c.d1,c.d2},':'),3)
+ end
+ if terminal then
+  for _,ev in ipairs(output) do terminal.s=math.max(terminal.s,ev.s) end terminal.rank=4
+ end
+ table.sort(output,function(a,b) if a.s~=b.s then return a.s<b.s end if a.rank~=b.rank then return a.rank<b.rank end return a.order<b.order end)
+ local packed={} pos=0
+ for _,ev in ipairs(output) do packed[#packed+1]=string.pack('<i4Bs4',ev.s-pos,ev.flags,ev.msg) pos=ev.s end
+ assert(R.MIDI_SetAllEvts(take,table.concat(packed)),'Could not write the MIDI event buffer.')
+ return true
+end
+local function write(take,scene,events,raw)
+ -- One native buffer write avoids thousands of per-event deletes/inserts,
+ -- whose cost grows sharply in long items. Keep all foreign event bytes.
+ if controllers.writeRaw(take,scene,events,raw) then return end
  -- Keep note/text indexes stable through the ENTIRE edit, including deletes.
  R.MIDI_DisableSort(take)
  -- Rebuild note-notation records only for notes with our assignment or changed channel.
@@ -914,9 +1114,10 @@ local function write(take,scene,events)
  end
  -- Finish all note edits before attaching NOTE records to their final onsets.
  R.MIDI_Sort(take)
- for _,n in ipairs(scene.notes) do if not n.generated and (n.a or n.changed or (n.controllers and #n.controllers>0)) then
+ for _,n in ipairs(scene.notes) do if not n.generated and (n.a or n.ending or n.changed or (n.controllers and #n.controllers>0)) then
   local tail=n.extras
   if n.a then tail=appendMarker(tail,payload(n.a)) end
+  if n.ending then tail=appendUserMarker(tail,'ABEND1',payload(n.ending)) end
   local control=controllers.pack(n.controllers,n.controllerShift)
   if control~='' then tail=appendUserMarker(tail,controllers.prefix,control) end
   if tail:find('%S') then
@@ -947,7 +1148,7 @@ local function musicalSignature(n)
  return string.format('%.6f:%.6f:%d:%d:%d:%d:%d',n.s,n.e,n.ch,n.p,n.v,n.sel and 1 or 0,n.mute and 1 or 0)
 end
 local function verifyWrittenNotes(take,scene,events)
- local function signature(n) return musicalSignature(n)..':'..(n.a and payload(n.a) or '')..':'..controllers.pack(n.controllers,n.controllerShift) end
+ local function signature(n) return musicalSignature(n)..':'..(n.a and payload(n.a) or '')..':'..controllers.pack(n.controllers,n.controllerShift)..':end:'..(n.ending and payload(n.ending) or '') end
  local expected={} local expectedCount=0
  for _,n in ipairs(scene.notes) do if not n.generated then
   local id=signature(n) expected[id]=(expected[id] or 0)+1 expectedCount=expectedCount+1
@@ -964,6 +1165,7 @@ local function verifyWrittenNotes(take,scene,events)
  if count~=expectedCount or generatedCount~=#events then error('MIDI note count changed unexpectedly. The MIDI edit has been reverted.') end
  for _,remaining in pairs(expected) do if remaining~=0 then error('A musical note is missing. The MIDI edit has been reverted.') end end
  if not controllers.match(actual,scene.plannedControls) then error('Controller integrity check failed. The MIDI edit has been reverted.') end
+ return actual
 end
 local legacyPatterns={}
 local function rememberLegacy(data)
@@ -1002,17 +1204,19 @@ end
 local function findOwnedSwitch(take,scene,n)
  local a=n.a if not a or a.mode=='ch' or n.mute then return end
  local channel=a.kschannel==0 and n.ch or a.kschannel-1
- local found
- for _,sw in ipairs(scene.notes) do
-  if sw.generated and sw.ch==channel and sw.p==a.pitch and sw.v==a.velocity and switchFits(take,a,n.s,sw.s) and (not found or sw.s>found.s) then found=sw end
+ local list=scene.switches[channel..':'..a.pitch..':'..a.velocity] or {}
+ local pos=a.lead<0 and afterSwitchStart(take,n.s,a.lead)+0.5 or n.s-0.000001
+ local lo,hi=1,#list local found
+ while lo<=hi do local mid=(lo+hi)//2
+  if list[mid].s<=pos then found=list[mid] lo=mid+1 else hi=mid-1 end
  end
- return found and found.key or nil
+ return found and switchFits(take,a,n.s,found.s) and found.key or nil
 end
 local function hasAnyOwnedSwitch(scene,n)
  local a=n.a local channel=a.kschannel==0 and n.ch or a.kschannel-1
  if a.lead>=0 and n.manualSignal and n.manualSignal.pitch==a.pitch and n.manualSignal.velocity==a.velocity then return true end
- for _,sw in ipairs(scene.notes) do if sw.generated and sw.ch==channel and sw.p==a.pitch and sw.v==a.velocity and (a.lead>=0 or switchFits(scene.take,a,n.s,sw.s)) then return true end end
- return false
+ if a.lead>=0 then return #(scene.switches[channel..':'..a.pitch..':'..a.velocity] or {})>0 end
+ return findOwnedSwitch(scene.take,scene,n)~=nil
 end
 local function restoreStaggerStart(n)
  local shift=n.a and n.a.shift
@@ -1029,11 +1233,12 @@ local function detachAssignment(n)
 end
 local function needsDefaultAssignments(scene)
  local default=defaultArt()
+ local bankName=bank().name
  for _,n in ipairs(scene.notes) do if not n.generated then
   if n.keyswitchRow and n.a and n.a.implicit then return true end
   if not n.keyswitchRow then
   if n.manualArt then if n.a and n.a.implicit then return true end
-  elseif default and (not n.a or (n.a.implicit and (n.a.bank~=bank().name or config(n.a)~=config(default)))) then return true end
+  elseif default and (not n.a or (n.a.implicit and (n.a.bank~=bankName or config(n.a)~=config(default)))) then return true end
   if not n.manualArt and not default and n.a and n.a.implicit then return true end
   end
  end end
@@ -1041,16 +1246,17 @@ local function needsDefaultAssignments(scene)
 end
 local function assignDefaults(scene)
  local default=defaultArt()
+ local bankName=bank().name
  for _,n in ipairs(scene.notes) do
   if n.keyswitchRow and n.a and n.a.implicit then detachAssignment(n) end
   if not n.generated and not n.keyswitchRow and (not n.a or n.a.implicit) then
   if n.manualArt then if n.a then n.a=nil n.changed=true end
   elseif not default then if n.a then detachAssignment(n) end
-  elseif not n.a or n.a.bank~=bank().name or config(n.a)~=config(default) then
+  elseif not n.a or n.a.bank~=bankName or config(n.a)~=config(default) then
    local base=n.a and n.a.base or n.ch
    restoreStaggerStart(n)
    n.oldch=n.oldch or n.ch n.changed=true
-   n.a={base=base,bank=bank().name,implicit=true}
+   n.a={base=base,bank=bankName,implicit=true}
    for k,v in pairs(default) do n.a[k]=v end
    n.ch=default.mode=='ks' and base or default.channel-1
   end
@@ -1143,63 +1349,41 @@ function automaticHistory.restore()
  automaticHistory.changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
 end
 local function rawKeyNotes(take)
- local ok,count,_,textCount=R.MIDI_CountEvts(take) if not ok then return nil end
- local state={take=take,count=count,notes={},counts={},onsets={},owned={},owners={},validOwned={}}
- local assignments,switches={},{}
+ local ok,count=R.MIDI_CountEvts(take) if not ok then return nil end
+ local state={take=take,count=count,notes={},counts={}}
  for i=0,count-1 do
   local yes,sel,mute,s,e,ch,p,v=R.MIDI_GetNote(take,i)
   if yes then
    local n={idx=i,sel=sel,mute=mute,s=s,e=e,ch=ch,p=p,v=v}
    n.id=string.format('%.6f:%.6f:%d:%d:%d:%d',s,e,ch,p,v,mute and 1 or 0)
-   n.key=key(s,ch,p) state.notes[#state.notes+1]=n
+   state.notes[#state.notes+1]=n
    state.counts[n.id]=(state.counts[n.id] or 0)+1
-   state.onsets[n.key]=(state.onsets[n.key] or 0)+1
   end
  end
- for i=0,textCount-1 do
-  local yes,_,_,pos,typ,msg=R.MIDI_GetTextSysexEvt(take,i)
-  if yes and typ==15 then
-   local ch,p,tail=msg:match('^NOTE (%d+) (%d+)(.*)$')
-   if ch then
-    local id=key(pos,tonumber(ch),tonumber(p))
-    if userValue(tail)==KS..':1' then
-     if state.onsets[id] then
-      state.owned[id]=true local row=ch..':'..p
-      state.owners[row]=(state.owners[row] or 0)+1
-      switches[#switches+1]={key=id,s=pos,ch=tonumber(ch),p=tonumber(p)}
-     end
-    elseif state.onsets[id] then
-     local marker=extractMarker(tail) local a=marker and assignment(marker)
-     if a and a.mode~='ch' then assignments[#assignments+1]={s=pos,ch=tonumber(ch),p=tonumber(p),a=a} end
-    end
-   end
-  end
- end
- local rows=keyswitchRows()
- for _,n in ipairs(assignments) do if not rows[n.ch..':'..n.p] then
-  local ch=n.a.kschannel==0 and n.ch or n.a.kschannel-1
-  for _,sw in ipairs(switches) do
-   if sw.ch==ch and sw.p==n.a.pitch and switchFits(take,n.a,n.s,sw.s) then state.validOwned[sw.key]=true end
-  end
- end end
  return state
 end
-local function captureKeyswitchGuard(take)
- local state=rawKeyNotes(take) if not state then return nil end
- local ok,raw=R.MIDI_GetAllEvts(take,'') if not ok then return nil end
- state.raw=raw state.scene=read(take) return state
+local function captureKeyswitchGuard(take,readyScene,readyRaw)
+ local ok,raw=true,readyRaw
+ if not raw then ok,raw=R.MIDI_GetAllEvts(take,'') end
+ if not ok then return nil end
+ local scene=readyScene or read(take) local state={take=take,raw=raw,scene=scene,counts={}}
+ for _,n in ipairs(scene.notes) do
+  local id=string.format('%.6f:%.6f:%d:%d:%d:%d',n.s,n.e,n.ch,n.p,n.v,n.mute and 1 or 0)
+  state.counts[id]=(state.counts[id] or 0)+1
+ end
+ return state
 end
-local function watchKeyswitchRows()
+local function watchKeyswitchRows(readyScene,readyRaw)
  local take=activeTake() if not take then keyswitchGuard=nil return end
  if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then return end
- local ok,current=pcall(captureKeyswitchGuard,take) if not ok or not current then return end
+ local ok,current=pcall(captureKeyswitchGuard,take,readyScene,readyRaw) if not ok or not current then return end
  local previous=keyswitchGuard
  keyswitchGuard=current
  if not previous or previous.take~=take then return end
  local function musicSignature(scene)
   local result={}
   for _,n in ipairs(scene.notes) do if not n.generated and not n.keyswitchRow then
-   result[#result+1]=string.format('%.6f:%.6f:%d:%d:%d:%s',n.s,n.e,n.ch,n.p,n.v,(n.a and payload(n.a) or '')..':ctrl:'..controllers.pack(n.controllers,n.controllerShift))
+   result[#result+1]=string.format('%.6f:%.6f:%d:%d:%d:%s',n.s,n.e,n.ch,n.p,n.v,(n.a and payload(n.a) or '')..':ctrl:'..controllers.pack(n.controllers,n.controllerShift)..':end:'..(n.ending and payload(n.ending) or ''))
   end end
   table.sort(result) return table.concat(result,'\n')
  end
@@ -1222,10 +1406,14 @@ local function watchKeyswitchRows()
   local after=new[id]
   if not after or changed[id] then removed[id]=true end
  end
- local ownerKeys={}
+ local ownerKeys,endingOwnerKeys={},{}
  for _,n in ipairs(previous.scene.notes) do if n.a and n.a.mode~='ch' then
   local owner=findOwnedSwitch(take,previous.scene,n)
   if owner and removed[owner] then ownerKeys[n.key]=true end
+ end end
+ for _,n in ipairs(previous.scene.notes) do if n.ending then
+  local ok,start,finish,ch=pcall(articulationGroups.endingPosition,take,n)
+  if ok and removed[key(start,ch,n.ending.pitch)] then endingOwnerKeys[n.key]=true end
  end end
  local success,err=xpcall(function()
   R.MIDI_DisableSort(take)
@@ -1234,7 +1422,11 @@ local function watchKeyswitchRows()
   for _,t in ipairs(current.scene.texts) do
    local tail
    if t.ownedKS and changed[t.key] then tail=setUser(t.tail,KS..':manual')
-   elseif ownerKeys[t.key] then local marker,extras=extractMarker(t.tail) if marker then tail=extras end end
+   elseif ownerKeys[t.key] or endingOwnerKeys[t.key] then
+    tail=t.tail
+    if ownerKeys[t.key] then local marker,extras=extractMarker(tail) if marker then tail=extras end end
+    if endingOwnerKeys[t.key] then local marker,extras=extractUserMarker(tail,'ABEND1') if marker then tail=extras end end
+   end
    if tail then edits[#edits+1]={t=t,tail=tail} end
   end
   table.sort(edits,function(a,b) return a.t.idx>b.t.idx end)
@@ -1253,10 +1445,11 @@ local function watchKeyswitchRows()
  R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  keyswitchGuard=captureKeyswitchGuard(take)
 end
-local function execute(a,clear,sync,timing,removedKeys,background,controlAction)
+local function execute(a,clear,sync,timing,removedKeys,background,controlAction,endingAction,removedEndings)
  local take=activeTake() if not take then return false end
  local ok,scene=pcall(read,take) if not ok then status=tostring(scene) return false end
  local removedMissing=0
+ for _,n in ipairs(scene.notes) do if n.ending and removedEndings and removedEndings[n.key]==payload(n.ending) then n.ending=nil n.changed=true end end
  for _,n in ipairs(scene.notes) do
   if not n.generated and n.a and n.a.mode~='ch' and not n.mute then
    local explicitRemoval=removedKeys and removedKeys[n.key]==payload(n.a)
@@ -1277,6 +1470,14 @@ local function execute(a,clear,sync,timing,removedKeys,background,controlAction)
  for _,n in ipairs(scene.notes) do if n.sel and not n.generated and not n.keyswitchRow then
   selected=selected+1
   local base=n.a and n.a.base or n.ch
+  if endingAction then
+   n.changed=true n.ending=nil
+   if endingAction.value then
+    n.ending={base=base,bank=bank().name}
+    for k,v in pairs(endingAction.value) do n.ending[k]=v end
+    n.ending.mode='ks' n.ending.lead=math.abs(n.ending.lead)
+   end
+  end
   if controlAction then
    if n.a and n.a.mode=='ch' then restoreStaggerStart(n) end
    controllers.set(n,controlAction.value)
@@ -1303,7 +1504,9 @@ local function execute(a,clear,sync,timing,removedKeys,background,controlAction)
  if controlAction and not controlAction.value then
   for _,n in ipairs(scene.notes) do if n.sel and not n.generated and not n.keyswitchRow and controllers.enabled(n.a) then
    n.a.ctrl='none' n.a.implicit=nil n.changed=true
-  end end
+  end
+  if n.sel and not n.generated and not n.keyswitchRow and controllers.enabled(n.ending) then n.ending.ctrl='none' n.changed=true end
+  end
  end
  prepareDefaults(take,scene)
  local room,moved=pcall(ensureBoundaryRoom,take,scene) if not room then status=tostring(moved) return false end
@@ -1319,7 +1522,7 @@ local function execute(a,clear,sync,timing,removedKeys,background,controlAction)
    end
   end end
  end
- if (not sync or controlAction) and selected==0 then status='No musical notes selected.' return false end
+ if (not sync or controlAction or endingAction) and selected==0 then status='No musical notes selected.' return false end
  local shifted=moved
  if not clear or defaultArt() then
   local fit,result=pcall(function() prepareDefaults(take,scene) return staggerConflicts(take,scene,sync or clear) end)
@@ -1335,28 +1538,31 @@ local function execute(a,clear,sync,timing,removedKeys,background,controlAction)
  local item=R.GetMediaItemTake_Item(take)
  local lengthBefore=R.GetMediaItemInfo_Value(item,'D_LENGTH')
  if not background then R.Undo_BeginBlock() end
+ local verifiedScene
  local success,err=xpcall(function()
   if scene.controlRight then
    local needed=R.MIDI_GetProjTimeFromPPQPos(take,scene.controlRight)-R.GetMediaItemInfo_Value(item,'D_POSITION')
    if needed>lengthBefore then assert(R.SetMediaItemInfo_Value(item,'D_LENGTH',needed),'Could not leave room for controller release.') end
   end
-  write(take,scene,events) R.MIDI_Sort(take) verifyWrittenNotes(take,scene,events)
+  write(take,scene,events,backup) R.MIDI_Sort(take) verifiedScene=verifyWrittenNotes(take,scene,events)
  end,debug.traceback)
  if not success then R.MIDI_SetAllEvts(take,backup) if R.GetMediaItemInfo_Value(item,'D_LENGTH')~=lengthBefore then R.SetMediaItemInfo_Value(item,'D_LENGTH',lengthBefore) end end
  R.MIDI_Sort(take) R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  if not background then
-  R.Undo_EndBlock(controlAction and (controlAction.value and ('Apply controller: '..controlAction.value.name) or 'Clear controllers') or removedKeys and 'Clear deleted keyswitch assignments' or timing and 'Change keyswitch timing' or sync and 'Refresh keyswitches' or clear and 'Clear articulation' or 'Replace articulation: '..a.name,-1)
+  R.Undo_EndBlock(endingAction and (endingAction.value and ('Apply ending: '..endingAction.value.name) or 'Clear ending') or controlAction and (controlAction.value and ('Apply controller: '..controlAction.value.name) or 'Clear controllers') or removedKeys and 'Clear deleted keyswitch assignments' or timing and 'Change keyswitch timing' or sync and 'Refresh keyswitches' or clear and 'Clear articulation' or 'Replace articulation: '..a.name,-1)
  elseif success then automaticHistory.remember(take,backup,nil,lengthBefore) end
  if not success then status='Changes reverted after a MIDI error.' R.MB(tostring(err),'Articulation Manager',0) return false end
  editGeneration=editGeneration+1
- keyswitchGuard=captureKeyswitchGuard(take)
+ keyswitchGuard=captureKeyswitchGuard(take,verifiedScene)
+ controllers.lastWrite={take=take,data=keyswitchGuard and keyswitchGuard.raw,scene=verifiedScene}
  if musicalGeometry then movementSnapshot={take=take,generation=editGeneration,signature=musicalGeometry(scene)} end
- status=controlAction and (controlAction.value and (controlAction.value.name..' — controller applied to '..selected..' notes.') or 'Controller assignments cleared.') or sync and 'Keyswitches refreshed.' or clear and 'Assignment cleared.' or a.name..' — notes: '..selected
+ status=endingAction and (endingAction.value and (endingAction.value.name..' — ending applied.') or 'Ending cleared.') or controlAction and (controlAction.value and (controlAction.value.name..' — controller applied to '..selected..' notes.') or 'Controller assignments cleared.') or sync and 'Keyswitches refreshed.' or clear and 'Assignment cleared.' or a.name..' — notes: '..selected
  if removedMissing>0 then status=status..'; deleted-switch assignments cleared: '..removedMissing end
  if shifted>0 then status=status..'; notes shifted: '..shifted end
  return true
 end
-local function apply(a) return execute(a,false,false) end
+function articulationGroups.applyEnding(a) return execute(nil,false,true,nil,nil,false,nil,{value=a}) end
+local function apply(a) if a.trigger=='end' then return articulationGroups.applyEnding(a) end return execute(a,false,false) end
 local function clear() return execute(nil,true,false) end
 local function applyController(c) return execute(nil,false,true,nil,nil,false,{value=c}) end
 local function sync(dropOrphans,background)
@@ -1385,23 +1591,27 @@ local function clearMissingAssignments()
 end
 -- Watch previously observed pulse ownership. Moving musical notes or changing
 -- tempo does not count as deleting a switch: its physical key must disappear.
-local function watchDeletedSwitches()
+local function watchDeletedSwitches(readyScene)
  local take=activeTake() if not take then deletionSnapshot=nil return end
- local ok,scene=pcall(read,take) if not ok then return end
+ local ok,scene=true,readyScene
+ if not scene then ok,scene=pcall(read,take) end
+ if not ok then return end
  local present={} for _,n in ipairs(scene.notes) do if n.generated then present[n.key]=true end end
- local missing={}
+ local missing,missingEndings={},{}
  local geometry=musicalGeometry(scene)
  local structural=deletionSnapshot and deletionSnapshot.take==take and deletionSnapshot.geometry~=geometry
  if deletionSnapshot and deletionSnapshot.take==take then
   for _,n in ipairs(scene.notes) do
    local previous=deletionSnapshot.notes[n.key]
+   local ending=(deletionSnapshot.endings or {})[n.key]
+   if not structural and n.ending and ending and ending.data==payload(n.ending) and not present[ending.switch] then missingEndings[n.key]=ending.data end
    if not structural and n.a and previous and not previous.rebuild and previous.switch and previous.data==payload(n.a) and not present[previous.switch] then missing[n.key]=previous.data end
   end
  end
- if next(missing) and execute(nil,false,true,nil,missing,true) then
-  local reread,updated=pcall(read,take) if reread then scene=updated end
+ if (next(missing) or next(missingEndings)) and execute(nil,false,true,nil,missing,true,nil,nil,missingEndings) then
+  scene=controllers.lastWrite.scene
  end
- local snapshot={take=take,notes={},geometry=musicalGeometry(scene)}
+ local snapshot={take=take,notes={},endings={},geometry=musicalGeometry(scene)}
  for _,n in ipairs(scene.notes) do
   if n.a and n.a.mode~='ch' and not n.mute then
    local previous=deletionSnapshot and deletionSnapshot.take==take and deletionSnapshot.notes[n.key]
@@ -1412,6 +1622,10 @@ local function watchDeletedSwitches()
    snapshot.notes[n.key]={data=payload(n.a),switch=owner,rebuild=rebuild or nil}
   end
  end
+ for _,n in ipairs(scene.notes) do if n.ending then
+  local ok,start,finish,ch=pcall(articulationGroups.endingPosition,take,n)
+  if ok then snapshot.endings[n.key]={data=payload(n.ending),switch=key(start,ch,n.ending.pitch)} end
+ end end
  deletionSnapshot=snapshot
 end
 -- NOTE notation follows native MIDI-editor moves/transposition. Rebuild owned
@@ -1420,7 +1634,7 @@ end
 musicalGeometry=function(scene)
  local values={}
  for _,n in ipairs(scene.notes) do if not n.generated then
-  values[#values+1]=string.format('%.6f:%.6f:%d:%d:%d:%s',n.s,n.e,n.ch,n.p,n.mute and 1 or 0,(n.a and payload(n.a) or '')..':ctrl:'..controllers.pack(n.controllers,n.controllerShift))
+  values[#values+1]=string.format('%.6f:%.6f:%d:%d:%d:%s',n.s,n.e,n.ch,n.p,n.mute and 1 or 0,(n.a and payload(n.a) or '')..':ctrl:'..controllers.pack(n.controllers,n.controllerShift)..':end:'..(n.ending and payload(n.ending) or ''))
  end end
  table.sort(values) return table.concat(values,'\n')
 end
@@ -1432,10 +1646,12 @@ switchesMatch=function(scene,events)
  table.sort(actual) table.sort(expected)
  return table.concat(actual,'\n')==table.concat(expected,'\n') and controllers.match(scene,scene.plannedControls)
 end
-local function watchMusicalEdits()
+local function watchMusicalEdits(readyScene)
  if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then return end
  local take=activeTake() if not take then movementSnapshot=nil return end
- local ok,scene=pcall(read,take) if not ok then return end
+ local ok,scene=true,readyScene
+ if not scene then ok,scene=pcall(read,take) end
+ if not ok then return end
  local signature=musicalGeometry(scene)
  local overlap=false local switches={}
  for _,n in ipairs(scene.notes) do if (n.generated or n.keyswitchRow) and not n.mute then switches[#switches+1]=n end end
@@ -1451,15 +1667,17 @@ local function watchMusicalEdits()
  if overlap or needsDefaultAssignments(scene) or (previous and previous.take==take and previous.generation==editGeneration and previous.signature~=signature) then
   local planned,events=pcall(plan,take,scene)
   if (needsDefaultAssignments(scene) or not planned or next(scene.manualEnds or {}) or not switchesMatch(scene,events)) and sync(false,true) then
-   local reread,updated=pcall(read,take) if reread then signature=musicalGeometry(updated) end
+   signature=musicalGeometry(controllers.lastWrite.scene)
   end
  end
  movementSnapshot={take=take,generation=editGeneration,signature=signature}
 end
-local function protectKeyswitchSelectionAndPitch()
+local function protectKeyswitchSelectionAndPitch(readyScene)
  if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then return end
  local take=activeTake() if not take then return end
- local ok,scene=pcall(read,take) if not ok then return end
+ local ok,scene=true,readyScene
+ if not scene then ok,scene=pcall(read,take) end
+ if not ok then return end
  local musicalSelected=false
  for _,n in ipairs(scene.notes) do if not n.generated and not n.keyswitchRow and n.sel then musicalSelected=true break end end
  if musicalSelected then
@@ -1491,6 +1709,17 @@ local function protectKeyswitchSelectionAndPitch()
  end
  -- Also repair a transpose performed before the observer could deselect the
  -- switches. NOTE ownership follows the native pitch edit; the mapping does not.
+ -- Most edits only change a musical note's length or start. A full switch plan
+ -- is unnecessary unless an owned switch left all assigned physical pitches.
+ local pitches={}
+ for _,n in ipairs(scene.notes) do if not n.generated and not n.keyswitchRow then
+  for _,a in pairs({n.a,n.ending}) do if a and a.mode~='ch' then
+   pitches[(a.kschannel==0 and n.ch or a.kschannel-1)..':'..a.pitch]=true
+  end end
+ end end
+ local misplaced=false
+ for _,n in ipairs(scene.notes) do if n.generated and not pitches[n.ch..':'..n.p] then misplaced=true break end end
+ if not misplaced then return end
  local planned,events=pcall(plan,take,scene) if not planned then return end
  local expected={}
  for _,ev in ipairs(events) do expected[key(ev.s,ev.ch,0)]=ev.p end
@@ -1613,8 +1842,7 @@ local function deleteLegacy()
 end
 -- Interface ------------------------------------------------------------------
 -- Compositing/menu approach follows Gridbox (Ilias-Timon Poulakis, MIT).
-local quickPopupMode=rawget(_G,'ABART_QUICK_POPUP')==true
-local popupMode=rawget(_G,'ABART_POPUP')==true or quickPopupMode
+local popupMode=rawget(_G,'ABART_QUICK_POPUP')==true and 'quick' or rawget(_G,'ABART_POPUP')==true
 if R.set_action_options and not popupMode then R.set_action_options(3) end
 if not R.JS_Composite and not popupMode then
  R.MB('js_ReaScriptAPI is required for the embedded MIDI editor field.','Articulation Manager',0) return
@@ -1763,7 +1991,7 @@ local function toggleStartup()
  if not ok then R.MB(status,'ArticulationBox startup',0) end
 end
 
-local function safeLabel(s) return (s:gsub('[|#!<>]',' ')) end
+local function safeLabel(s) return (s:gsub('[|#!<>]',' '):gsub('&','&&')) end
 local function prompt(caption,labels,values,count)
  local ok,result=R.GetUserInputs(caption,count,labels,values)
  if ok then return split(result,',') end
@@ -1771,19 +1999,22 @@ end
 local function assignmentIdentity(a)
  return a.bank..'\t'..a.name..'\t'..config(a)
 end
-local function selectionState()
+local function selectionState(readyScene)
  local editor=R.MIDIEditor_GetActive() local take=editor and R.MIDIEditor_GetTake(editor)
- local state={take=take,total=0,none=0,buckets={},order={},notes={},label=defaultArt() and defaultArt().name or '—'}
+ take=take or controllers.editorTake()
+ local default=defaultArt() local bankName=bank().name
+ local state={take=take,total=0,none=0,buckets={},order={},notes={},label=default and default.name or '—'}
  if not take or not isMidiTake(take) then return state end
- local ok,scene=pcall(read,take)
+ local ok,scene=true,readyScene
+ if not scene then ok,scene=pcall(read,take) end
  if not ok then state.error=tostring(scene) state.label='!' return state end
  for _,n in ipairs(scene.notes) do if n.sel and not n.generated and not n.keyswitchRow then
   state.total=state.total+1
   state.notes[#state.notes+1]=n
   if not n.a or n.a.implicit then state.none=state.none+1 end
   local a=n.manualArt or n.a
-  if not a and defaultArt() then
-   a={bank=bank().name} for k,v in pairs(defaultArt()) do a[k]=v end
+  if not a and default then
+   a={bank=bankName} for k,v in pairs(default) do a[k]=v end
   end
   if a then
    local id=assignmentIdentity(a)
@@ -1805,29 +2036,141 @@ end
 -- Scrolling and playback do not change MIDI. Keep the last field state instead
 -- of decoding every note and notation marker through every observer each poll.
 automaticHistory.observerState={}
+function automaticHistory.rawSelection(data)
+ -- Ignore only selection flags. Timing, notes, notation, CC and mute bytes
+ -- remain part of the fingerprint; an actual edit always takes the full path.
+ local events,plain,selected={}, {}, {}
+ local offset,pos=1,0
+ local ok=pcall(function()
+  while offset<=#data do
+   local first=offset
+   local delta,flags,msg;delta,flags,msg,offset=string.unpack('<i4Bs4',data,offset)
+   pos=pos+delta
+   events[#events+1]={first=first,last=offset-1,pos=pos,flags=flags,msg=msg}
+   plain[#plain+1]=data:sub(first,first+3)..string.char(flags&0xFE)..data:sub(first+5,offset-1)
+   if #msg>=3 and msg:byte(1)&0xF0==0x90 and msg:byte(3)>0 then
+    selected[key(pos,msg:byte(1)&15,msg:byte(2))]=flags&1~=0
+   end
+  end
+ end)
+ if not ok then return nil end
+ return {plain=table.concat(plain),events=events,selected=selected}
+end
+function automaticHistory.selectionOnly(current,previous)
+ if not previous.scene then return false end
+ local raw=automaticHistory.rawSelection(current.data)
+ local old=previous.selection or automaticHistory.rawSelection(previous.data)
+ if not raw or not old or raw.plain~=old.plain then return false end
+ local scene=previous.scene local musical=false local protected={}
+ for _,n in ipairs(scene.notes) do
+  if n.generated or n.keyswitchRow then
+   protected[key(n.s,n.ch,n.p)]=true protected[key(n.e,n.ch,n.p)]=true
+  elseif raw.selected[n.key] then musical=true end
+ end
+ local data=current.data
+ if musical then
+  local pieces={} local changed=false
+  for _,ev in ipairs(raw.events) do
+   local msg=ev.msg local keep=true
+   if ev.flags&1~=0 then
+    if #msg>=3 and (msg:byte(1)&0xF0==0x90 or msg:byte(1)&0xF0==0x80) then
+     keep=not protected[key(ev.pos,msg:byte(1)&15,msg:byte(2))]
+    elseif msg:sub(1,2)==string.char(0xFF,15) then
+     local ch,p=msg:sub(3):match('^NOTE (%d+) (%d+) ')
+     if ch then keep=not protected[key(ev.pos,tonumber(ch),tonumber(p))] end
+    end
+   end
+   if keep then pieces[#pieces+1]=data:sub(ev.first,ev.last)
+   else
+    pieces[#pieces+1]=data:sub(ev.first,ev.first+3)..string.char(ev.flags&0xFE)..data:sub(ev.first+5,ev.last)
+    changed=true
+   end
+  end
+  if changed then
+   local after=table.concat(pieces)
+   if not R.MIDI_SetAllEvts(current.take,after) then return false end
+   R.UpdateItemInProject(R.GetMediaItemTake_Item(current.take))
+   automaticHistory.remember(current.take,data)
+   data=after
+  end
+ end
+ for _,n in ipairs(scene.notes) do n.sel=raw.selected[n.key] or false
+  if musical and (n.generated or n.keyswitchRow) then n.sel=false end
+ end
+ cachedState=selectionState(scene)
+ current.data=data current.scene=scene current.selection=raw
+ -- The normalized bytes are unchanged by our selection-only write.
+ automaticHistory.observerState=current
+ return true
+end
+function automaticHistory.environment(take,project,changes)
+ local saved=automaticHistory.tempoSnapshot
+ if not saved or saved.project~=project or saved.changes~=changes then
+  local values={R.Master_GetTempo and R.Master_GetTempo() or ''}
+  if R.CountTempoTimeSigMarkers and R.GetTempoTimeSigMarker then
+   for i=0,R.CountTempoTimeSigMarkers(project)-1 do
+    local ok,time,measure,beat,bpm,num,den,linear=R.GetTempoTimeSigMarker(project,i)
+    values[#values+1]=table.concat({tostring(ok),time,measure,beat,bpm,num,den,tostring(linear)},':')
+   end
+  end
+  saved={project=project,changes=changes,signature=table.concat(values,'|')}
+  automaticHistory.tempoSnapshot=saved
+ end
+ local item=R.GetMediaItemTake_Item(take)
+ return table.concat({saved.signature,R.GetMediaItemInfo_Value(item,'D_POSITION'),R.GetMediaItemInfo_Value(item,'D_LENGTH'),
+  R.GetMediaItemTakeInfo_Value and R.GetMediaItemTakeInfo_Value(take,'D_STARTOFFS') or 0,
+  R.GetMediaItemTakeInfo_Value and R.GetMediaItemTakeInfo_Value(take,'D_PLAYRATE') or 1},'|')
+end
 function automaticHistory.observerStamp()
  local take=activeTake() if not take then return nil end
  local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
- -- Raw event bytes include selection and notation flags as well as notes/CC.
- -- One native read avoids all Lua decoding when only the view or playhead moves.
  local ok,data=R.MIDI_GetAllEvts(take,'')
  if not ok then return nil end
  local current=bank()
  local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
  local settings=table.concat({tostring(bankIndex),R.GetExtState(SECTION,'autoStagger'),R.GetExtState(SECTION,'staggerMs'),R.GetExtState(SECTION,'ksOverlap'),R.GetExtState(SECTION,'ksLengthMode'),R.GetExtState(SECTION,'nameKeyswitchRows')},'\n')
- return {take=take,project=project,data=data,bank=current,banks=loadedBankData,settings=settings,changes=changes}
+ return {take=take,project=project,data=data,bank=current,banks=loadedBankData,settings=settings,
+  environment=automaticHistory.environment(take,project,changes),changes=changes}
+end
+function automaticHistory.nativeEditBusy()
+ -- Quantize has a live preview buffer. Writing MIDI while it is open races
+ -- that buffer and native Fix overlaps, so reconcile once the dialog closes.
+ local window=R.JS_Window_Find and R.JS_Window_Find('Quantize Events',true)
+ return window and (not R.JS_Window_IsVisible or R.JS_Window_IsVisible(window)) or false
 end
 function automaticHistory.pollObservers(force)
- if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then automaticHistory.observerState.pending=true return end
+ if (R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0) or automaticHistory.nativeEditBusy() then automaticHistory.observerState.pending=true return end
  local current=automaticHistory.observerStamp()
  if not current then automaticHistory.observerState={} return end
  local previous=automaticHistory.observerState
- if not force and not previous.pending and previous.take==current.take and previous.project==current.project
-  and previous.data==current.data and previous.bank==current.bank and previous.banks==current.banks
-  and previous.settings==current.settings and previous.changes==current.changes then return end
- watchKeyswitchRows() protectKeyswitchSelectionAndPitch() watchDeletedSwitches() watchMusicalEdits()
- rowNamesUpdate() cachedState=selectionState()
- automaticHistory.observerState=automaticHistory.observerStamp() or {}
+ local sameContext=previous.take==current.take and previous.project==current.project
+  and previous.bank==current.bank and previous.banks==current.banks and previous.settings==current.settings
+  and previous.environment==current.environment
+ if not force and sameContext then
+  if previous.data==current.data then previous.pending=nil return end
+  if automaticHistory.selectionOnly(current,previous) then return end
+ end
+ local take,data,scene=current.take,current.data,nil
+ local function refreshScene()
+  local got,updated=R.MIDI_GetAllEvts(take,'')
+  if not got then scene=nil return end
+  if scene and updated==data then return end
+  data=updated
+  local written=controllers.lastWrite
+  if written and written.take==take and written.data==data then scene=written.scene
+  else local ok,value=pcall(read,take) scene=ok and value or nil end
+ end
+ refreshScene()
+ if scene then
+  watchKeyswitchRows(scene,data) refreshScene()
+  protectKeyswitchSelectionAndPitch(scene) refreshScene()
+  watchDeletedSwitches(scene) refreshScene()
+  watchMusicalEdits(scene) refreshScene()
+ end
+ rowNamesUpdate() cachedState=selectionState(scene)
+ current=automaticHistory.observerStamp() or {}
+ current.scene=scene
+ automaticHistory.observerState=current
 end
 local function releaseIntercepts()
  if host and R.JS_Window_IsWindow(host) then
@@ -1842,7 +2185,7 @@ local function unlink()
  host=nil currentLabel=nil gesture=nil
 end
 local function screenAnchor()
- if quickPopupMode then return R.GetMousePosition() end
+ if popupMode=='quick' then return R.GetMousePosition() end
  if host and R.JS_Window_IsWindow(host) then return R.JS_Window_ClientToScreen(host,box.x,box.y+box.h) end
  return R.GetMousePosition()
 end
@@ -1850,7 +2193,7 @@ local function showNativeMenu(text)
  releaseIntercepts()
  local x,y=screenAnchor()
  local focus=R.JS_Window_GetFocus and R.JS_Window_GetFocus()
- if quickPopupMode then
+ if popupMode=='quick' then
   local title='ArticulationBox quick menu'
   gfx.init(title,0,0,0,x,y)
   gfx.x,gfx.y=0,0
@@ -1908,10 +2251,29 @@ local function newArticulation()
  end
  return a
 end
+local function bankNew()
+ local f=prompt('New bank','Name,extrawidth=240','My library',1)
+ if not f then return false end
+ local name=f[1]:match('^%s*(.-)%s*$')
+ if name=='' or name=='Empty bank' then
+  R.MB('Enter a bank name other than Empty bank.','New bank',0) return false
+ end
+ for _,b in ipairs(banks) do if b.name==name then
+  R.MB('A bank with this name already exists. Choose it from Banks or enter a different name.','New bank',0) return false
+ end end
+ banks[#banks+1]={name=name,arts={},controllers={}} bankIndex=#banks save()
+ cachedState=nil refresh=0 currentLabel=nil
+ status=name..' — bank created and selected.'
+ return true
+end
 local function editArt(index)
  if editorBusy then return end
  local target=bank() local track=bankTrack
  if R.GetMediaItem_Track and not track then R.MB('Open a MIDI item on the destination track before editing its articulations.','ArticulationBox',0) return end
+ if target.name=='Empty bank' then
+  if not bankNew() then return end
+  target=bank() track=bankTrack index=nil
+ end
  local project=R.EnumProjects and R.EnumProjects(-1,'')
  local destinationEditor=R.MIDIEditor_GetActive() or host
  target.controllers=target.controllers or {}
@@ -1919,6 +2281,14 @@ local function editArt(index)
  local function editorEntry(saved)
   local a=newArticulation()
   for k,v in pairs(saved or {}) do a[k]=v end
+  local id=articulationGroups.key(a)
+  a.groupName=id and (target.groupNames or {})[id] or nil
+  a.grouped=articulationGroups.multiple(target,a)
+  if a.grouped and not a.groupName then
+   local best
+   for _,other in ipairs(target.arts) do if articulationGroups.key(other)==id and (not best or other.velocity>best.velocity) then best=other end end
+   a.groupName=best and best.name
+  end
   return a
  end
  local source=mapping(index)
@@ -1944,8 +2314,8 @@ local function editArt(index)
   table.sort(order,function(i,j) if target.arts[i].pitch~=target.arts[j].pitch then return target.arts[i].pitch>target.arts[j].pitch end return i<j end)
   for _,i in ipairs(order) do
    local a=target.arts[i]
-   local entry={} for k,v in pairs(a) do entry[k]=v end
-   entries[#entries+1]={index=i,entry=entry,label=a.name..(a.mode~='ch' and ('  [KS '..a.pitch..', Vel '..a.velocity..']') or ('  [Ch '..a.channel..']'))}
+   local entry=editorEntry(a)
+   entries[#entries+1]={index=i,entry=entry,label=a.name..(a.trigger=='end' and '  [Ending]' or '')..(a.mode~='ch' and ('  [KS '..a.pitch..', Vel '..a.velocity..']') or ('  [Ch '..a.channel..']'))}
   end
   for i,c in ipairs(target.controllers) do
    entries[#entries+1]={index=-i,entry=editorEntry(c),label=c.name..'  [Controller]'}
@@ -1964,10 +2334,11 @@ local function editArt(index)
   end
  end
  editorBusy=true
+ controllers.editorContext={take=destinationEditor and R.MIDIEditor_GetTake(destinationEditor),editor=destinationEditor,project=project}
  local opened,ok,err=pcall(openEditor,R,{
   entry=entry,editing=index~=nil,bankName=target.name,selected=index or 0,entries=listMappings(),allowControllers=true,
   isAlive=function() return running and (popupMode or R.GetExtState(SECTION,'activeInstance')==active) end,
-  onClose=function() editorBusy=false end,
+  onClose=function() editorBusy=false controllers.editorContext=nil end,
   onSelect=function(selected)
    local ok,why=ready() if not ok then return nil,why end
    if selected~=0 and not mapping(selected) then return nil,'This mapping was removed. Reopen the editor.' end
@@ -1980,11 +2351,11 @@ local function editArt(index)
    local standalone=updated.mode=='controller'
    if (standalone and (not updated.name:find('%S') or not controllers.enabled(updated) or not controllers.valid(updated))) or (not standalone and not valid(updated)) then return false,'Check the MIDI values and controller timing.' end
    if index and mapping(index)~=source then return false,'This mapping changed. Close this window and reopen it.' end
-   if target.name=='Empty bank' and #target.arts==0 and #target.controllers==0 then
-     local name='New bank' local used={} for _,b in ipairs(presets) do used[b.name]=true end
-     local suffix=2 while used[name] do name='New bank '..suffix suffix=suffix+1 end
-     target.name=name
-   end
+   if index and index>0 and (source.trigger=='end')~=(updated.trigger=='end') then index=nil source=nil end
+   local id=articulationGroups.key(updated)
+   if id and updated.grouped and (not updated.groupName or not updated.groupName:find('%S')) then return false,'Enter a group name.' end
+   if id and updated.grouped then target.groupNames=target.groupNames or {};target.groupNames[id]=updated.groupName end
+   updated.groupName=nil updated.grouped=nil
    if standalone then
     updated=controllers.copy(updated)
     if index and index<0 then target.controllers[-index]=updated
@@ -1992,7 +2363,7 @@ local function editArt(index)
     source=updated
    elseif index and index>0 then
     target.arts[index]=updated source=updated
-    if target.default==index and updated.mode=='ch' then target.default=nil end
+    if target.default==index and (updated.mode=='ch' or updated.trigger=='end') then target.default=nil end
    else
     target.arts[#target.arts+1]=updated index=#target.arts source=updated
    end
@@ -2021,7 +2392,7 @@ local function editArt(index)
   end
  })
  if not opened then err=ok ok=false end
- if not ok then editorBusy=false R.MB(tostring(err),'ArticulationBox',0) end
+ if not ok then editorBusy=false controllers.editorContext=nil R.MB(tostring(err),'ArticulationBox',0) end
 end
 local function timingSettings()
  local f=prompt('Keyswitch timing for this bank','Timing distance (ms),Legacy length (ms),Legacy overlap (ms)',
@@ -2056,12 +2427,8 @@ local function import()
  R.SetExtState(SECTION,'legacy',serialize(),true)
  status='Banks imported.'
 end
-local function bankNew()
- local f=prompt('New bank','Name','My library',1)
- if f and f[1]~='' then banks[#banks+1]={name=f[1],arts={}} bankIndex=#banks save() end
-end
 local function bankRename()
- local f=prompt('Bank name','Name',bank().name,1)
+ local f=prompt('Bank name','Name,extrawidth=240',bank().name,1)
  if f and f[1]~='' then
   local old=bank().name bank().name=f[1]
   for i=#presets,1,-1 do if presets[i].name==old then table.remove(presets,i) end end
@@ -2118,7 +2485,7 @@ end
 local function defaultMenu()
  local entries={{label='None',checked=not bank().default,action=function() setDefaultArt(nil) end},{separator=true}}
  for _,i in ipairs(articulationOrder()) do local a=bank().arts[i] local index=i
-  entries[#entries+1]={label=a.name,checked=bank().default==i,disabled=a.mode=='ch',action=function() setDefaultArt(index) end}
+  entries[#entries+1]={label=a.name,checked=bank().default==i,disabled=a.mode=='ch' or a.trigger=='end',action=function() setDefaultArt(index) end}
  end
  entries[#entries+1]={separator=true}
  entries[#entries+1]={label='Default requires a keyswitch mapping',disabled=true}
@@ -2176,14 +2543,15 @@ local function compileMenu(entries)
  return table.concat(parts,'|'),actions
 end
 local function noteCount(n) return n..(n==1 and ' note' or ' notes') end
-local function articulationEntries(state)
+local function articulationEntries(state,endings)
  local menu,groups,emitted={},{},{}
  local current=bank()
- local order=articulationOrder()
- local function groupKey(a)
-  if a.mode=='ch' then return nil end
-  return table.concat({a.mode,a.mode=='both' and a.channel or 0,a.kschannel,a.pitch},':')
+ local order={}
+ for _,i in ipairs(articulationOrder()) do
+  local a=current.arts[i]
+  if (a.trigger=='end')==(endings==true) then order[#order+1]=i end
  end
+ local groupKey=articulationGroups.key
  for _,i in ipairs(order) do
   local a=current.arts[i] local id=groupKey(a)
   if id then
@@ -2205,11 +2573,14 @@ local function articulationEntries(state)
   local saved={bank=current.name} for k,v in pairs(a) do saved[k]=v end
   local bucket=state.buckets[assignmentIdentity(saved)]
   local count=bucket and bucket.count or 0
+  if endings then count=0;for _,n in ipairs(state.notes or {}) do if n.ending and n.ending.name==a.name and n.ending.pitch==a.pitch and n.ending.velocity==a.velocity then count=count+1 end end end
   local label=a.name..(variant and ('  [Vel '..a.velocity..']') or '')
   if count>0 and count<state.total then label=label..'  ('..noteCount(count)..')' end
   return {label=label,checked=count>0,disabled=state.total==0,action=function()
    if bank()~=current or current.arts[index]~=a then R.MB('The active bank changed. Open the menu again.','Articulation',0) return end
-   if not apply(a) then R.MB(status,'Articulation',0) end
+   local ok
+   if endings then ok=articulationGroups.applyEnding(a) else ok=apply(a) end
+   if not ok then R.MB(status,endings and 'Ending' or 'Articulation',0) end
   end}
  end
  for _,i in ipairs(order) do
@@ -2218,7 +2589,7 @@ local function articulationEntries(state)
    if not emitted[id] then
     emitted[id]=true
     local children={} for _,index in ipairs(group.indices) do children[#children+1]=entry(index,true) end
-    menu[#menu+1]={label=current.arts[group.indices[1]].name,children=children}
+    menu[#menu+1]={label=(current.groupNames or {})[id] or current.arts[group.indices[1]].name,children=children}
    end
   else menu[#menu+1]=entry(i,false) end
  end
@@ -2258,8 +2629,19 @@ local function controllerEntries(state)
  end
  return menu
 end
+function articulationGroups.endingMenu(state)
+ local entries=articulationEntries(state,true)
+ local assigned=false for _,n in ipairs(state.notes or {}) do if n.ending then assigned=true break end end
+ if #entries>0 or assigned then
+  if #entries>0 then entries[#entries+1]={separator=true} end
+  entries[#entries+1]={label='Clear ending',disabled=not assigned,action=function() if not articulationGroups.applyEnding(nil) then R.MB(status,'Ending',0) end end}
+ end
+ return entries
+end
 local function quickEntries(state)
  local menu=articulationEntries(state) local controls=controllerEntries(state)
+ local endings=articulationGroups.endingMenu(state)
+ if #endings>0 then table.insert(menu,1,{label='Ending',children=endings}) end
  if #controls>0 then
   if #menu>0 then table.insert(menu,1,{separator=true}) end
   table.insert(menu,1,{label='Controller',children=controls})
@@ -2270,9 +2652,9 @@ end
 local helpTopics={
  {title="Quick start",text=[[1. Open a MIDI item and keep Articulation_Manager.lua running.
 2. Create a bank: Settings > Banks > New.
-3. Add / Edit articulation: configure mappings in one window. Use Save & Next to build a bank quickly.
+3. Add / Edit articulation: if Empty bank is selected, name and create a bank first. Then configure mappings. Use Save & Next to build a bank quickly.
 4. Select musical notes, open the field menu and choose an articulation.
-5. Optional: Settings > Default articulation for notes without an override.
+5. Optional: Default articulation for notes without an override.
 6. Save the REAPER project.
 
 Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for ready articulation and controller choices at the mouse cursor.]]},
@@ -2280,18 +2662,25 @@ Assign Articulation_Quick_Menu.lua to a MIDI Editor shortcut for ready articulat
 Keyswitch: sends a MIDI note that selects a sound in your instrument.
 KS + Channel: combines both methods.
 
-Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected settings into a new mapping, leaving the original intact. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show their relevant parameters and can include a linked Controller. The fourth type, Controller, saves an independent preset. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
+Add / Edit articulation opens one compact parameter window. Bank shows the destination. Articulation selects Add New or a saved mapping. New names start empty. Add variant copies the selected name and settings into a new mapping, leaving the original intact. For keyswitch variants it first asks for a group name. Group name is shown when editing a velocity group and renames its submenu without changing variant names. Edit the copied name as needed; Save & Next still clears the name. Remove articulation deletes the selected mapping from this bank, preserving existing MIDI assignments. Keyswitch, Channel and KS + Channel show their relevant parameters and can include a linked Controller. Controller saves an independent preset. Ending saves a separate end-of-note keyswitch. Channel sets the musical-note channel; KS channel sets the keyswitch channel. KS channel 0 uses the musical note's channel.
 
 Playing a MIDI key or clicking a piano-roll key automatically fills KS note and velocity. A mapped key also loads its saved name and parameters; an exact velocity match selects that variant. Both values remain editable. Save stores changes without closing the window. Save & Next stores the current mapping and always switches to Add New with an empty name and the current parameters. The last saved name stays visible. Piano-roll row names update immediately after every save. Cancel discards only the current unsaved entry. Resize the window by its edges; its size is remembered.
 
-Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; the highest-velocity name labels the group. Each variant keeps its own name and velocity.
+Mappings on the same keyswitch pitch and routing with different velocities are grouped in a submenu. Variants are sorted from higher to lower velocity; Group name sets the submenu title independently; older groups use the highest-velocity name until renamed. Each variant keeps its own name and velocity.
 
 Select notes and choose a name to apply it. Clear articulation removes the explicit override; a configured default can apply again. Defaults require a keyswitch mapping.
 
 The field shows the selected articulation, Mixed for different assignments, or a dash if none is assigned. With no notes selected, it shows the default name, if configured.]]},
+ {title="Endings",text=[[Choose the Ending type in Add / Edit articulation and configure its KS note, velocity, channel and Delay. Only Ending-type presets appear in the Ending submenu. Select one to add an independent switch at the end of selected notes. Ordinary Keyswitch, Channel and KS + Channel mappings remain outside this menu. Select notes, choose a starting articulation such as Open or Slap, then select an Ending such as Slide Down. Ending is an independent assignment and does not replace the starting articulation or note channel.
+
+Delay is the distance BEFORE note-off. The switch starts at least one MIDI tick before the musical end and ends with the note. Timing is clamped inside the note; notes too short for a separate ending are rejected without changes. Ending follows note moves and length edits while the manager runs.
+
+Ending > Clear ending removes only the ending. Clear articulation removes only the primary override. Endings cannot be used as defaults. Their velocity and KS channel are independent of the musical note's velocity. MIDI channels still share one physical keyswitch timeline.
+
+Changing an ending preset does not rewrite existing note snapshots: reapply it to selected notes. Save the project to retain assignments and the bank.]]},
  {title="Controllers",text=[[Choose Controller in Add / Edit articulation to save a named, independent preset. It appears under Controller in the full and quick menus. This submenu is also available to reset controllers linked to articulations or assigned to selected notes. Applying it preserves the selected notes' articulation. Other articulation types can include a linked Controller; choose None to leave it disabled.
 
-The chooser starts with Pitch Bend, Mod Wheel (CC 1) and Hold Pedal (CC 64), followed by the other CC numbers. CC values range from 0 to 127. Pitch Bend ranges from -8192 to 8191, with 0 at center. Hold Pedal normally uses 127 to hold and reset 0 to release.
+The chooser starts with None (unassigned), followed by Pitch Bend, Mod Wheel (CC 1), Hold Pedal (CC 64), and the other CC numbers. Visiting Controller does not automatically assign Pitch Bend. CC values range from 0 to 127. Pitch Bend ranges from -8192 to 8191, with 0 at center. Hold Pedal normally uses 127 to hold and reset 0 to release.
 
 Length: Full note sets the value before note-on and resets after note-off. Note start makes a short pulse across note-on. Note end sets the value while the note is still held and resets after note-off. Before and After set these margins in milliseconds, with at least one MIDI tick on either side. Reset value is the value sent at the end. Control channel 0 follows the musical note's channel.
 
@@ -2302,12 +2691,12 @@ Controllers affect every sounding voice on their MIDI channel. Overlapping notes
 Controller > Reset controllers removes all controller assignments from selected notes while preserving their articulation. The command is disabled when no selected notes have controllers. Settings > Clear controller assignments provides the same operation. Removing a preset from the bank preserves existing MIDI assignments. Controller presets are saved with this track's bank.]]},
  {title="Banks and saving",text=[[Banks selects the current track's bank. Settings > Banks creates, renames, removes, imports or exports banks. Export saves all banks of the current track.
 
-Track banks are independent. New tracks start with Empty bank; saved bank templates remain available. Bank and articulation edits are saved automatically. Save the project to retain track bank choices and note assignments.
+Track banks are independent. New tracks start with Empty bank; saved bank templates remain available. Add / Edit articulation first asks you to create a named bank when Empty bank is selected; Cancel leaves the editor closed. The new bank is saved and selected before editing. Bank and articulation edits are saved automatically. Save the project to retain track bank choices and note assignments.
 
 Appearance and common playback preferences persist between REAPER sessions. Timing changes also update the current bank's mappings.
 
 Removing a bank or mapping does not erase existing MIDI assignments. Use Clear articulation on notes when you want to remove their overrides.]]},
- {title="Manual keyswitches",text=[[Draw or edit notes directly on mapped articulation rows. They are treated as manual switches and do not receive a default articulation. Their last switch remains active until another manual switch or an explicit automatic assignment on that MIDI channel.
+ {title="Manual keyswitches",text=[[Draw or edit notes directly on mapped articulation rows. They are treated as manual switches and do not receive a default articulation. With no default, their last switch remains active until another switch. With a default configured, manual switches override notes in their drawn region; later unassigned notes return to the default.
 
 A later switch shortens the earlier keyswitch at its start. Different switches at exactly the same time on one channel remain ambiguous.
 
@@ -2368,6 +2757,8 @@ local function buildMenu(state)
  local articulationMenu=articulationEntries(state)
  if #articulationMenu==0 then articulationMenu={{label='No articulations in this bank',disabled=true}} end
  menu[#menu+1]={label='Articulations',children=articulationMenu}
+ local endings=articulationGroups.endingMenu(state)
+ if #endings>0 then menu[#menu+1]={label='Ending',children=endings} end
  local controllerMenu=controllerEntries(state)
  if #controllerMenu>0 then menu[#menu+1]={label='Controller',children=controllerMenu} end
  local bankEntries={}
@@ -2376,13 +2767,13 @@ local function buildMenu(state)
  end
  menu[#menu+1]={separator=true}
  menu[#menu+1]={label='Banks',children=bankEntries}
+ menu[#menu+1]={label='Default articulation',disabled=bank().name=='Empty bank',children=bank().name~='Empty bank' and defaultMenu() or nil}
  menu[#menu+1]={label='Settings',children={
   {label='Banks',children={{label='New…',action=bankNew},{label='Rename…',action=bankRename},{label='Remove…',action=bankDelete},{separator=true},{label='Import…',action=import},{label='Export…',action=export}}},
   {label='Appearance and position',children={{label='Field position…',action=positionSettings},{label='Size and font…',action=sizeSettings}}},
   {label='Legacy keyswitches',children={{label='Find for review',action=findLegacy},{label='Remove reviewed',action=deleteLegacy}}},
   {separator=true},
   {label='Name keyswitch rows',checked=R.GetExtState(SECTION,'nameKeyswitchRows')~='0',action=toggleRowNames},
-  {label='Default articulation',children=defaultMenu()},
   {label='Keyswitch timing…',action=timingSettings},
   {label='Chase MIDI note-ons',checked=chaseEnabled(),action=toggleChase},
   {label='Auto-stagger conflicting notes',checked=R.GetExtState(SECTION,'autoStagger')=='1',action=toggleStagger},
@@ -2403,7 +2794,7 @@ end
 local function artMenu()
  local state=selectionState()
  if state.error then R.MB(state.error,'MIDI assignments',0) return end
- local entries=quickPopupMode and quickEntries(state) or buildMenu(state)
+ local entries=popupMode=='quick' and quickEntries(state) or buildMenu(state)
  if #entries==0 then R.MB('No articulations in this track\'s bank.','Articulation',0) return end
  local text,actions=compileMenu(entries)
  local n=showNativeMenu(text)
@@ -2525,12 +2916,18 @@ end
 local instanceToken=tostring({})..':'..tostring(R.time_precise())
 R.SetExtState(SECTION,'activeInstance',instanceToken,false)
 if sec and cmd then R.SetToggleCommandState(sec,cmd,1) R.RefreshToolbar2(sec,cmd) end
-local transposeCheckTime=0
+automaticHistory.transposeCheckTime=0
 local function loop()
  if not running or R.GetExtState(SECTION,'activeInstance')~=instanceToken then return end
- if editorBusy then R.defer(loop) return end
- if R.time_precise()>transposeCheckTime then automaticHistory.restore() watchItemTranspose() transposeCheckTime=R.time_precise()+0.20 end
+ if R.time_precise()>automaticHistory.transposeCheckTime then
+  if not automaticHistory.nativeEditBusy() then automaticHistory.restore() watchItemTranspose() end
+  automaticHistory.transposeCheckTime=R.time_precise()+0.20
+ end
  local editor=R.MIDIEditor_GetActive()
+ if not editor and controllers.editorTake() then
+  local context=controllers.editorContext
+  if context.editor and R.JS_Window_IsWindow(context.editor) then editor=context.editor end
+ end
  if editor~=host then unlink() host=editor end
  if host and R.JS_Window_IsWindow(host) then
   local ok,w,h=R.JS_Window_GetClientSize(host)
