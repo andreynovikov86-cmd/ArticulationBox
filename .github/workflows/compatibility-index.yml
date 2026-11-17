@@ -1,0 +1,30 @@
+name: Sync ArticulationBox compatibility index
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/update_compatibility_index.py'
+      - '.github/workflows/compatibility-index.yml'
+permissions:
+  contents: write
+concurrency:
+  group: articulationbox-compatibility-index
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read ArticulationBox releases from ReaScripts
+        run: python3 tools/update_compatibility_index.py
+      - name: Publish compatibility index if changed
+        run: |
+          git add index.xml
+          if git diff --cached --quiet -- index.xml; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sync ArticulationBox compatibility index from ReaScripts'
+          git push origin HEAD:main

@@ -146,82 +146,23 @@ Protect linked pooled MIDI sources from clearing the original item.]]></changelo
         <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/USER_GUIDE_RU.md</source>
         <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/LICENSE.md</source>
       </version>
+      <version name="1.0.14" author="Andrey Novikov" time="2026-11-17T08:52:17Z">
+        <changelog>Move ArticulationBox to the shared ReaScripts repository and update installation links. Preserve banks, MIDI format and playback behavior from 1.0.13.</changelog>
+        <source main="main midi_editor">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/Articulation_Manager.lua</source>
+        <source main="midi_editor" file="Articulation_Quick_Menu.lua">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/Articulation_Quick_Menu.lua</source>
+        <source main="midi_editor" file="Articulation_Menu_Popup.lua">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/Articulation_Menu_Popup.lua</source>
+        <source file="Articulation_Editor.lua">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/Articulation_Editor.lua</source>
+        <source file="THIRD_PARTY_NOTICES.txt">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
+        <source file="INSTALL_RU.txt">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/INSTALL_RU.txt</source>
+        <source file="USER_GUIDE.md">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/USER_GUIDE.md</source>
+        <source file="USER_GUIDE_RU.md">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/USER_GUIDE_RU.md</source>
+        <source file="LICENSE.md">https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/543f02e2a06be193d7e551e286b4fb11c5640494/ArticulationBox/LICENSE.md</source>
+      </version>
     </reapack>
   </category>
   <metadata>
-    <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 ArticulationBox\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 By {\b Andrey Novikov}.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 {\b English} \u183 ? {\field{\*\fldinst{HYPERLINK "README_RU.md"}}{\fldrslt{\ul
-\u1056 ?\u1091 ?\u1089 ?\u1089 ?\u1082 ?\u1080 ?\u1081 ?
-}}}
-\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 User guide: {\field{\*\fldinst{HYPERLINK "ArticulationBox/USER_GUIDE.md"}}{\fldrslt{\ul
-English
-}}}
- \u183 ? {\field{\*\fldinst{HYPERLINK "ArticulationBox/USER_GUIDE_RU.md"}}{\fldrslt{\ul
-\u1056 ?\u1091 ?\u1089 ?\u1089 ?\u1082 ?\u1080 ?\u1081 ?
-}}}
-. Open {\b Help} in the full script menu for offline explanations.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 A compact articulation menu for the REAPER MIDI Editor.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 One ReaPack package includes the embedded articulation field, a quick menu at the mouse cursor, and a full settings menu. It supports manual and automatic keyswitches, MIDI channel switching, independent track banks, default articulations, keyswitches that follow musical notes, and keyswitch pitch protection during transposition. The script interface is in English.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Install with ReaPack\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Import this repository URL:\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \f1 https://raw.githubusercontent.com/andreynovikov86-cmd/ArticulationBox/main/index.xml\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 In REAPER, open {\b Extensions > ReaPack > Import repositories} and paste the URL. Then open {\b Browse packages}, find {\b ArticulationBox}, choose {\b Install}, and click {\b Apply}.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 The script requires {\field{\*\fldinst{HYPERLINK "https://github.com/juliansader/ReaExtensions"}}{\fldrslt{\ul
-js_ReaScriptAPI
-}}}
- and {\field{\*\fldinst{HYPERLINK "https://github.com/cfillion/reaimgui"}}{\fldrslt{\ul
-ReaImGui
-}}}
- for the parameter editor. Install both separately through ReaPack and restart REAPER after installing the extensions.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 First run\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Open a MIDI item. In {\b Actions > MIDI Editor}, run {\f1 Articulation_Manager.lua}. Assign a shortcut to {\f1 Articulation_Quick_Menu.lua} in the same action section for quick articulation selection. Keep the main script running so it can update linked keyswitches.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Create a bank through {\b Banks > New}, or choose {\b Add / Edit articulation} with Empty bank selected to create a bank first. Choose {\b Default articulation} below Banks for notes without another assignment. Enable {\b Settings > Run script on startup} for automatic startup. Save your project to restore track bank choices and note assignments.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Personal banks, projects, and user backups are not included in this repository. When moving from a manual installation to ReaPack, reassign your shortcuts to the actions from the new installation.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 For a full installation guide in Russian, see {\field{\*\fldinst{HYPERLINK "ArticulationBox/INSTALL_RU.txt"}}{\fldrslt{\ul
-INSTALL_RU
-}}}
-. Third-party code acknowledgments are in {\field{\*\fldinst{HYPERLINK "ArticulationBox/THIRD_PARTY_NOTICES.txt"}}{\fldrslt{\ul
-THIRD_PARTY_NOTICES
-}}}
-.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Articulation editor\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Add / Edit articulation uses one compact, resizable window with {\b Keyswitch}, {\b Channel}, {\b KS + Channel}, {\b Controller}, and {\b Ending} choices. Play a MIDI key or click a piano-roll key to fill the keyswitch note and velocity, then edit either value if needed. {\b Save & Next} builds several mappings without reopening the editor. Window size is remembered. The Bank line identifies the destination; the Articulation list selects a new or saved mapping, and Remove articulation deletes a saved mapping. Full-menu choices live under Articulations; same-pitch velocity variants have their own submenus. The shortcut still opens choices directly.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Choose {\b Before note start} or {\b After note start} and set Delay in milliseconds. A delayed keyswitch can trigger a loop ending after a chord starts, with independent keyswitch velocity. Automatic keyswitches still follow the musical note\u8217's end.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Manual keyswitches\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 You can draw and edit MIDI notes directly on articulation rows. These notes do not receive a default articulation. With a default articulation selected, a manual switch applies within its drawn region and the default returns for later notes. Without a default, the latest switch remains active until another switch or explicit assignment on that MIDI channel.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 If you independently change an automatic keyswitch's pitch, position, length, or velocity, it becomes manual. Its previous automatic assignments are removed while the musical notes are preserved. Moving musical notes still moves their linked automatic keyswitches.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 When a later keyswitch starts on the same MIDI channel, the earlier keyswitch is shortened to end at that point. Musical note lengths are preserved.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Updates\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 To install updates, use {\b Extensions > ReaPack > Synchronize packages}.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 To publish a new release, change the package code, increase {\f1 @version} in {\f1 ArticulationBox/Articulation_Manager.lua}, update {\f1 @changelog}, and push to {\f1 main}. The workflow uses the {\field{\*\fldinst{HYPERLINK "https://github.com/cfillion/reapack-index"}}{\fldrslt{\ul
-official ReaPack indexer
-}}}
-. Existing indexed versions are retained, and download links refer to fixed commits.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 License\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 ArticulationBox is licensed under the {\field{\*\fldinst{HYPERLINK "LICENSE.md"}}{\fldrslt{\ul
-MIT License
-}}}
-, which permits use, modification and redistribution, including commercial use, with the required copyright and license notices.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Adapted Gridbox code retains its original MIT copyright and license notice in {\field{\*\fldinst{HYPERLINK "ArticulationBox/THIRD_PARTY_NOTICES.txt"}}{\fldrslt{\ul
-THIRD_PARTY_NOTICES
-}}}
-. Both notices are included in the ReaPack package.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Controllers\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Save Pitch Bend or any CC as an independent named preset, or attach it to an articulation. Ready menus show {\b Controller} when presets are available or assigned controllers can be reset. {\b Reset controllers} clears controllers from selected notes while preserving articulations. Choose {\b Full note}, {\b Note start}, or {\b Note end}, with Before/After margins and a reset value. {\b None} is selected initially; Pitch Bend, Mod Wheel and Hold Pedal follow it in the chooser. Controllers follow note edits and Undo/Redo; see the {\field{\*\fldinst{HYPERLINK "ArticulationBox/USER_GUIDE.md#controllers"}}{\fldrslt{\ul
-user guide
-}}}
-.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Ending\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 {\b Type \u8594 ? Ending} creates a separate end-of-note keyswitch. The Ending menu lists only these presets. Apply Open or Slap normally, then add a slide from Ending. Changing the primary articulation keeps the ending; Clear ending removes it independently. Delay is measured before note-off.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Editing and performance\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Keep Add / Edit open while moving or resizing notes: links remain active. During the native Quantize Events live preview, automatic MIDI writes pause and resume when the dialog closes. Selection changes such as Select all do not regenerate switches; unchanged playback and scrolling reuse the cached state. Large-item writes are batched while musical-note integrity checks remain enabled.\par}
-}
-]]></description>
+    <description>{\rtf1\ansi ArticulationBox is maintained in ReaScripts by Andrey Novikov. This compatibility index mirrors its releases so existing installations can keep updating.}</description>
+    <link href="https://github.com/andreynovikov86-cmd/ReaScripts/tree/main/ArticulationBox">Current package</link>
+    <link href="https://raw.githubusercontent.com/andreynovikov86-cmd/ReaScripts/main/index.xml">Shared ReaPack index</link>
   </metadata>
 </index>
