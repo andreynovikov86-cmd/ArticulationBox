@@ -1,5 +1,5 @@
 -- @description ArticulationBox
--- @version 1.0.10
+-- @version 1.0.13
 -- @author Andrey Novikov
 -- @provides
 --   [main=main,midi_editor] .
@@ -18,23 +18,12 @@
 --   Personal banks are stored outside this package and are not distributed.
 --   Licensed under MIT; see LICENSE.md and THIRD_PARTY_NOTICES.txt.
 -- @changelog
---   Keep note links active while Add / Edit articulation is open.
---   Pause automatic writes during native Quantize Events preview.
---   Use one MIDI buffer write and indexed matching for long items.
---   Handle selection changes without regenerating keyswitches.
---   Skip MIDI scans on unrelated project changes during playback.
---   Display literal ampersands in articulation menus.
---   Add explicit Ending type; only ending records appear in its submenu.
---   Add independent Ending keyswitches with Note end timing and Clear ending.
---   Create and select a named bank before editing articulations from Empty bank.
---   Widen bank name fields for creation and renaming.
---   Clear the Name input buffer after Save & Next and when learning an unmapped key.
---   Exclude standalone Controller presets from keyswitch name learning.
---   Keep the source name when creating an articulation variant.
---   Add independent group names to keyswitch velocity submenus.
---   Move Default articulation below Banks; disable it for Empty bank.
---   Restore defaults after manual keyswitch regions and show named velocity groups.
---   Start Controller with None; do not add Pitch Bend when changing types.
+--   Preserve overlapping same-pitch MIDI voices when replacing articulations.
+--   Keep raw MIDI snapshots intact on rollback; avoid redundant native sorting.
+--   Clear automatic assignments in newly copied or pasted items on tracks with Empty bank.
+--   Retain articulation assignments when copying within a configured track.
+--   Detect newly appeared take identities, prune removed identities for Redo and skip unchanged items.
+--   Protect linked pooled MIDI sources from clearing the original item.
 
 -- ArticulationBox by Andrey Novikov.
 -- License: MIT. See LICENSE.md and THIRD_PARTY_NOTICES.txt.
@@ -1035,13 +1024,31 @@ function controllers.writeRaw(take,scene,events,raw)
   local status=#msg>0 and msg:byte(1)&0xF0
   if #msg==3 and (status==0x90 or status==0x80) then
    local on=status==0x90 and msg:byte(3)>0
-   local n=consume(on and starts or ends,key(ev.s,msg:byte(1)&15,msg:byte(2)))
-   -- Imported MIDI may contain unmatched note-ons/offs which the native note
-   -- API does not enumerate. Preserve those foreign bytes unchanged.
-   keep=not n or not n.generated
-   if n and keep then
-    ev.s=round(on and n.s or n.e)
-    ev.msg=string.char(status|n.ch,n.p,msg:byte(3))
+   local id=key(ev.s,msg:byte(1)&15,msg:byte(2))
+   if on then
+    local n=consume(starts,id)
+    -- Preserve imported unmatched events. A native note-on has one owner.
+    keep=not n or not n.generated
+    if n and keep then
+     ev.s=round(n.s) ev.msg=string.char(status|n.ch,n.p,msg:byte(3))
+    end
+   else
+    -- REAPER exposes overlapping same-pitch voices with a shared first off,
+    -- even when the raw buffer has further unmatched offs. Consume the whole
+    -- native group together, preserving unchanged off bytes and foreign offs.
+    local list=ends[id]
+    if list then
+     ends[id]=nil keep=false
+     local targets={}
+     for _,n in ipairs(list) do if not n.generated then
+      local target=key(round(n.e),n.ch,n.p)
+      if target==id then keep=true
+      elseif not targets[target] then
+       targets[target]=true
+       output[#output+1]={s=round(n.e),flags=ev.flags,msg=string.char(status|n.ch,n.p,msg:byte(3)),rank=ev.rank,order=ev.order}
+      end
+     end end
+    end
    end
   elseif #msg==3 and (status==0xB0 or status==0xE0) then
    keep=not consume(removeCC,controllers.eventKey(ev.s,status,msg:byte(1)&15,msg:byte(2),msg:byte(3)))
@@ -1088,7 +1095,7 @@ end
 local function write(take,scene,events,raw)
  -- One native buffer write avoids thousands of per-event deletes/inserts,
  -- whose cost grows sharply in long items. Keep all foreign event bytes.
- if controllers.writeRaw(take,scene,events,raw) then return end
+ if controllers.writeRaw(take,scene,events,raw) then return true end
  -- Keep note/text indexes stable through the ENTIRE edit, including deletes.
  R.MIDI_DisableSort(take)
  -- Rebuild note-notation records only for notes with our assignment or changed channel.
@@ -1440,7 +1447,7 @@ local function watchKeyswitchRows(readyScene,readyRaw)
   for id,count in pairs(current.counts) do assert(after.counts[id]==count,'A MIDI note changed while enabling manual editing') end
   for id,count in pairs(after.counts) do assert(current.counts[id]==count,'A MIDI note changed while enabling manual editing') end
  end,debug.traceback)
- if not success then R.MIDI_SetAllEvts(take,current.raw) R.MIDI_Sort(take) status='Manual edit metadata could not be updated.'
+ if not success then R.MIDI_SetAllEvts(take,current.raw) status='Manual edit metadata could not be updated.'
  else automaticHistory.remember(take,current.raw) deletionSnapshot=nil status='Manual keyswitch edit preserved.' end
  R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  keyswitchGuard=captureKeyswitchGuard(take)
@@ -1544,10 +1551,13 @@ local function execute(a,clear,sync,timing,removedKeys,background,controlAction,
    local needed=R.MIDI_GetProjTimeFromPPQPos(take,scene.controlRight)-R.GetMediaItemInfo_Value(item,'D_POSITION')
    if needed>lengthBefore then assert(R.SetMediaItemInfo_Value(item,'D_LENGTH',needed),'Could not leave room for controller release.') end
   end
-  write(take,scene,events,backup) R.MIDI_Sort(take) verifiedScene=verifyWrittenNotes(take,scene,events)
+  -- The bulk writer already sorts events without normalizing overlaps.
+  -- MIDI_Sort would merge overlapping voices and can also damage a rollback.
+  if not write(take,scene,events,backup) then R.MIDI_Sort(take) end
+  verifiedScene=verifyWrittenNotes(take,scene,events)
  end,debug.traceback)
  if not success then R.MIDI_SetAllEvts(take,backup) if R.GetMediaItemInfo_Value(item,'D_LENGTH')~=lengthBefore then R.SetMediaItemInfo_Value(item,'D_LENGTH',lengthBefore) end end
- R.MIDI_Sort(take) R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
+ R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  if not background then
   R.Undo_EndBlock(endingAction and (endingAction.value and ('Apply ending: '..endingAction.value.name) or 'Clear ending') or controlAction and (controlAction.value and ('Apply controller: '..controlAction.value.name) or 'Clear controllers') or removedKeys and 'Clear deleted keyswitch assignments' or timing and 'Change keyswitch timing' or sync and 'Refresh keyswitches' or clear and 'Clear articulation' or 'Replace articulation: '..a.name,-1)
  elseif success then automaticHistory.remember(take,backup,nil,lengthBefore) end
@@ -1702,7 +1712,7 @@ local function protectKeyswitchSelectionAndPitch(readyScene)
     end
     for _,count in pairs(expected) do assert(count==0,'A note changed while deselecting switches') end
    end,debug.traceback)
-   if not success then R.MIDI_SetAllEvts(take,backup) R.MIDI_Sort(take) return end
+   if not success then R.MIDI_SetAllEvts(take,backup) return end
    R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
    automaticHistory.remember(take,backup)
   end
@@ -1771,7 +1781,7 @@ local function bakeProtectedTakePitch(take)
   for _,count in pairs(expected) do assert(count==0,'A note changed unexpectedly during transpose') end
  end,debug.traceback)
  if not success then
-  R.MIDI_SetAllEvts(take,backup) R.MIDI_Sort(take)
+  R.MIDI_SetAllEvts(take,backup)
   R.SetMediaItemTakeInfo_Value(take,'D_PITCH',0)
   status='Transpose cancelled after a MIDI error; the original notes were preserved.'
  else
@@ -1784,22 +1794,110 @@ local function bakeProtectedTakePitch(take)
  R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
  return success
 end
+-- Track banks belong to tracks; owned note assignments travel in the MIDI.
+-- Observe track ownership without decoding unchanged takes. Only an actual
+-- transfer to an unconfigured track clears the carried automatic assignments.
+function automaticHistory.emptyTrack(track)
+ local ok,data=R.GetSetMediaTrackInfo_String(track,trackBankKey,'',false)
+ if not ok or data=='' then return true end
+ local list=parse(data) if not list then return true end
+ local _,index=R.GetSetMediaTrackInfo_String(track,trackIndexKey,'',false)
+ local selected=list[number(index,1,#list,true) or 1]
+ return not selected or selected.name=='Empty bank'
+end
+function automaticHistory.clearTransferred(take)
+ local got,backup=R.MIDI_GetAllEvts(take,'') if not got then return false end
+ -- New ordinary MIDI items need no note decoding or rewriting.
+ local binary=pcall(string.unpack,'<i4Bs4',backup)
+ if binary and not backup:find('ABART4:',1,true) and not backup:find('ABEND1:',1,true)
+  and not backup:find('ABKS4:',1,true) and not backup:find('ABCTRL1:',1,true) and not backup:find('ABCC1:',1,true) then return true end
+ local ok,scene=pcall(read,take) if not ok then status=tostring(scene) return false end
+ local managed=next(scene.generated)~=nil or #(scene.controlTexts or {})>0
+ local item=R.GetMediaItemTake_Item(take)
+ local left=math.ceil(R.MIDI_GetPPQPosFromProjTime(take,R.GetMediaItemInfo_Value(item,'D_POSITION')))
+ for _,n in ipairs(scene.notes) do if not n.generated and (n.a or n.ending or n.controllers) then
+  managed=true
+  local originalStart=n.s
+  controllers.restoreShift(n)
+  if n.a then detachAssignment(n) end
+  -- Native quantization can already have removed the saved one-tick offset.
+  -- Never push a visible note outside the receiving item's left boundary.
+  if n.s<left then n.s=math.min(originalStart,left) end
+  n.a=nil n.ending=nil n.controllers=nil n.controllerShift=nil
+  n.effective=nil n.manualArt=nil n.manualSignal=nil n.changed=true
+ end end
+ if not managed then return true end
+ scene.plannedControls={}
+ local success,err=xpcall(function()
+  if not write(take,scene,{},backup) then R.MIDI_Sort(take) end
+  verifyWrittenNotes(take,scene,{})
+ end,debug.traceback)
+ if not success then
+  R.MIDI_SetAllEvts(take,backup)
+  status='Track transfer cleanup reverted: '..tostring(err) return false
+ end
+ R.UpdateItemInProject(R.GetMediaItemTake_Item(take))
+ automaticHistory.remember(take,backup)
+ keyswitchGuard=nil deletionSnapshot=nil movementSnapshot=nil
+ controllers.lastWrite=nil automaticHistory.observerState={}
+ status='Articulations cleared after transfer to a track without a bank.'
+ return true
+end
+function automaticHistory.trackTransfer(take,item,project,seen,emptyTracks,shared)
+ if not R.GetMediaItem_Track or not R.GetSetMediaTrackInfo_String or not R.GetSetMediaItemTakeInfo_String then return end
+ local track=R.GetMediaItem_Track(item)
+ if not track then return end
+ local ok,guid=R.GetSetMediaItemTakeInfo_String(take,'GUID','',false)
+ if not ok or guid=='' then return end
+ if seen then seen[guid]=true end
+ local trackId=R.GetTrackGUID and R.GetTrackGUID(track) or track
+ automaticHistory.trackOwners=automaticHistory.trackOwners or {}
+ local owners=automaticHistory.trackOwners[project]
+ if not owners then owners={} automaticHistory.trackOwners[project]=owners end
+ local previous=owners[guid]
+ local appeared=not previous and automaticHistory.trackScanReady and automaticHistory.trackScanReady[project]
+ if (previous and previous~=trackId) or appeared then
+  local empty=emptyTracks and emptyTracks[track]
+  if empty==nil then empty=automaticHistory.emptyTrack(track) if emptyTracks then emptyTracks[track]=empty end end
+  if empty then
+   if shared then status='Linked MIDI copy: unpool this item before clearing its articulations.' return end
+   if not automaticHistory.clearTransferred(take) then return end
+  end
+ end
+ owners[guid]=trackId
+end
 local function watchItemTranspose()
  if not R.GetMediaItemTakeInfo_Value or not R.SetMediaItemTakeInfo_Value or not R.CountMediaItems or not R.CountTakes then return end
  if R.JS_Mouse_GetState and R.JS_Mouse_GetState(1)&1~=0 then return end
  local project=R.EnumProjects and R.EnumProjects(-1,'') or 0
  local changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)
  if changes and automaticHistory.transposeSnapshot and automaticHistory.transposeSnapshot.project==project and automaticHistory.transposeSnapshot.changes==changes then return end
+ local takes,pools,seen,emptyTracks={},{},{},{}
  for i=0,R.CountMediaItems(project)-1 do
   local item=R.GetMediaItem(project,i)
   if validPointer(item,'MediaItem*',project) then
    for j=0,R.CountTakes(item)-1 do
     local take=R.GetTake(item,j)
     -- CountTakes includes empty take slots; GetTake can return nil for them.
-    if isMidiTake(take,project) and math.abs(R.GetMediaItemTakeInfo_Value(take,'D_PITCH'))>0.000001 then bakeProtectedTakePitch(take) end
+    if isMidiTake(take,project) then
+     local pool
+     if R.BR_GetMidiTakePoolGUID then
+      local ok,id=R.BR_GetMidiTakePoolGUID(take) if ok and id~='' then pool=id end
+     elseif R.GetMediaItemTake_Source then pool=R.GetMediaItemTake_Source(take) end
+     if pool then pools[pool]=(pools[pool] or 0)+1 end
+     takes[#takes+1]={take=take,item=item,pool=pool}
+    end
    end
   end
  end
+ for _,entry in ipairs(takes) do
+  automaticHistory.trackTransfer(entry.take,entry.item,project,seen,emptyTracks,entry.pool and pools[entry.pool]>1)
+  if math.abs(R.GetMediaItemTakeInfo_Value(entry.take,'D_PITCH'))>0.000001 then bakeProtectedTakePitch(entry.take) end
+ end
+ local owners=automaticHistory.trackOwners and automaticHistory.trackOwners[project]
+ if owners then for guid in pairs(owners) do if not seen[guid] then owners[guid]=nil end end end
+ automaticHistory.trackScanReady=automaticHistory.trackScanReady or {}
+ automaticHistory.trackScanReady[project]=true
  automaticHistory.transposeSnapshot={project=project,changes=R.GetProjectStateChangeCount and R.GetProjectStateChangeCount(project)}
 end
 local cleanupPreview=nil
@@ -1808,8 +1906,9 @@ local function legacyEdit(take,title,fn)
  local got,backup=R.MIDI_GetAllEvts(take,'') if not got then return false end
  R.Undo_BeginBlock()
  local ok,err=xpcall(fn,debug.traceback)
- if not ok then R.MIDI_SetAllEvts(take,backup) status='Cleanup reverted after an error.' end
- R.MIDI_Sort(take) R.UpdateItemInProject(R.GetMediaItemTake_Item(take)) R.Undo_EndBlock(title,-1)
+ if not ok then R.MIDI_SetAllEvts(take,backup) status='Cleanup reverted after an error.'
+ else R.MIDI_Sort(take) end
+ R.UpdateItemInProject(R.GetMediaItemTake_Item(take)) R.Undo_EndBlock(title,-1)
  return ok
 end
 local function findLegacy()
