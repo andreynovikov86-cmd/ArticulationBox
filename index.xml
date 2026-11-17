@@ -129,6 +129,23 @@ Start Controller with None; do not add Pitch Bend when changing types.]]></chang
         <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/368751a751a66cb12fd4ca48cef76e8dad0f7705/ArticulationBox/USER_GUIDE_RU.md</source>
         <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/368751a751a66cb12fd4ca48cef76e8dad0f7705/ArticulationBox/LICENSE.md</source>
       </version>
+      <version name="1.0.13" author="Andrey Novikov" time="2026-11-17T05:54:41Z">
+        <changelog><![CDATA[Preserve overlapping same-pitch MIDI voices when replacing articulations.
+Keep raw MIDI snapshots intact on rollback; avoid redundant native sorting.
+Clear automatic assignments in newly copied or pasted items on tracks with Empty bank.
+Retain articulation assignments when copying within a configured track.
+Detect newly appeared take identities, prune removed identities for Redo and skip unchanged items.
+Protect linked pooled MIDI sources from clearing the original item.]]></changelog>
+        <source main="main midi_editor">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/Articulation_Manager.lua</source>
+        <source main="midi_editor" file="Articulation_Quick_Menu.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/Articulation_Quick_Menu.lua</source>
+        <source main="midi_editor" file="Articulation_Menu_Popup.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/Articulation_Menu_Popup.lua</source>
+        <source file="Articulation_Editor.lua">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/Articulation_Editor.lua</source>
+        <source file="THIRD_PARTY_NOTICES.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/THIRD_PARTY_NOTICES.txt</source>
+        <source file="INSTALL_RU.txt">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/INSTALL_RU.txt</source>
+        <source file="USER_GUIDE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/USER_GUIDE.md</source>
+        <source file="USER_GUIDE_RU.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/USER_GUIDE_RU.md</source>
+        <source file="LICENSE.md">https://github.com/andreynovikov86-cmd/ArticulationBox/raw/37365e00cb08ee28ea502b7367b137d8ca3c6cf5/ArticulationBox/LICENSE.md</source>
+      </version>
     </reapack>
   </category>
   <metadata>
